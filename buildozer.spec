@@ -20,7 +20,8 @@ version = 1.0
 entrypoint = main.py
 
 # Benötigte Bibliotheken
-requirements = python3,kivy
+requirements = python3,kivy,pyjnius,android
+android.permissions = CAMERA
 
 # Anzeige
 fullscreen = 0
@@ -32,8 +33,6 @@ android.minapi = 26
 android.sdk = 33
 android.ndk = 25b
 
-# Berechtigungen
-android.permissions = CAMERA
 
 # Architektur
 android.archs = arm64-v8a
