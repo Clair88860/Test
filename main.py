@@ -7,7 +7,6 @@ from kivy.core.window import Window
 from kivy.storage.jsonstore import JsonStore
 from kivy.graphics import Color, Ellipse
 from kivy.uix.widget import Widget
-from kivy.clock import Clock
 import time
 
 # Android Permissions
@@ -18,9 +17,51 @@ except ImportError:
     Permission = None
 
 
-# ───────────── Design ─────────────
 DARK_BLUE_BG = (0.02, 0.1, 0.3, 1)
 TEXT_COLOR = (1, 1, 1, 1)
+
+
+# ───────────── Weißer Kreis Button ─────────────
+class CircleButton(Widget):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.size = (150, 150)
+        self.bind(pos=self.update_canvas, size=self.update_canvas)
+
+        with self.canvas:
+            Color(1, 1, 1, 1)
+            self.circle = Ellipse(pos=self.pos, size=self.size)
+
+    def update_canvas(self, *args):
+        self.circle.pos = self.pos
+        self.circle.size = self.size
+
+
+# ───────────── Kamera Screen ─────────────
+class CameraScreen(BoxLayout):
+    def __init__(self, app):
+        super().__init__(orientation="vertical")
+        self.app = app
+        Window.clearcolor = DARK_BLUE_BG
+
+        self.camera = Camera(index=0, resolution=(640, 480), play=True)
+        self.add_widget(self.camera)
+
+        bottom = BoxLayout(size_hint=(1, 0.25))
+        bottom.add_widget(Label())
+
+        self.capture_btn = CircleButton()
+        self.capture_btn.bind(on_touch_down=self.capture_image)
+        bottom.add_widget(self.capture_btn)
+
+        bottom.add_widget(Label())
+        self.add_widget(bottom)
+
+    def capture_image(self, instance, touch):
+        if instance.collide_point(*touch.pos):
+            filename = f"/storage/emulated/0/DCIM/photo_{int(time.time())}.png"
+            self.camera.export_to_png(filename)
+            print("Foto gespeichert:", filename)
 
 
 # ───────────── Willkommen Screen ─────────────
@@ -52,70 +93,19 @@ class WelcomeScreen(BoxLayout):
             background_color=DARK_BLUE_BG,
             color=TEXT_COLOR
         )
-        btn.bind(on_press=self.request_camera_permission)
+        btn.bind(on_press=self.ask_permission)
         self.add_widget(btn)
 
-    def request_camera_permission(self, instance):
+    def ask_permission(self, instance):
         if request_permissions:
-            request_permissions([Permission.CAMERA], self.after_permission)
+            request_permissions([Permission.CAMERA], self.permission_result)
         else:
-            self.after_permission(None, [True])
+            self.permission_result(None, [True])
 
-    def after_permission(self, permissions, results):
+    def permission_result(self, permissions, results):
         if all(results):
             self.app.store.put("welcome", shown=True)
-            self.app.show_camera()
-
-
-# ───────────── Weißer Kreis Button ─────────────
-class CircleButton(Widget):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.size = (150, 150)
-        self.bind(pos=self.update_canvas, size=self.update_canvas)
-
-        with self.canvas:
-            Color(1, 1, 1, 1)  # Weiß
-            self.circle = Ellipse(pos=self.pos, size=self.size)
-
-    def update_canvas(self, *args):
-        self.circle.pos = self.pos
-        self.circle.size = self.size
-
-
-# ───────────── Kamera Screen ─────────────
-class CameraScreen(BoxLayout):
-    def __init__(self, app):
-        super().__init__(orientation="vertical")
-        self.app = app
-        Window.clearcolor = DARK_BLUE_BG
-
-        # Kamera
-        self.camera = Camera(
-            index=0,
-            resolution=(640, 480),
-            play=True
-        )
-
-        self.add_widget(self.camera)
-
-        # Untere Leiste
-        bottom = BoxLayout(size_hint=(1, 0.25))
-        bottom.add_widget(Label())
-
-        # Weißer Kreis Button
-        self.capture_btn = CircleButton()
-        self.capture_btn.bind(on_touch_down=self.capture_image)
-        bottom.add_widget(self.capture_btn)
-
-        bottom.add_widget(Label())
-        self.add_widget(bottom)
-
-    def capture_image(self, instance, touch):
-        if instance.collide_point(*touch.pos):
-            filename = f"/storage/emulated/0/DCIM/photo_{int(time.time())}.png"
-            self.camera.export_to_png(filename)
-            print("Foto gespeichert:", filename)
+            self.app.root = CameraScreen(self.app)
 
 
 # ───────────── Main App ─────────────
@@ -124,19 +114,9 @@ class MainApp(App):
         self.store = JsonStore("app_state.json")
 
         if not self.store.exists("welcome"):
-            self.root = WelcomeScreen(self)
+            return WelcomeScreen(self)
         else:
-            self.root = CameraScreen(self)
-
-        return self.root
-
-    def show_camera(self):
-        self.root_window.clear_widgets()
-        self.root = CameraScreen(self)
-        self.root_window.add_widget(self.root)
-
-    def on_resume(self):
-        return True
+            return CameraScreen(self)
 
 
 if __name__ == "__main__":
