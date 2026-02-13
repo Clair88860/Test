@@ -2,7 +2,6 @@ from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
-from kivy.uix.popup import Popup
 from kivy.uix.camera import Camera
 from kivy.core.window import Window
 from kivy.storage.jsonstore import JsonStore
@@ -15,7 +14,6 @@ except ImportError:
     Permission = None
 
 
-# ───────────── Design ─────────────
 DARK_BLUE_BG = (0.02, 0.1, 0.3, 1)
 TEXT_COLOR = (1, 1, 1, 1)
 
@@ -49,82 +47,49 @@ class WelcomeScreen(BoxLayout):
             background_color=DARK_BLUE_BG,
             color=TEXT_COLOR
         )
-        btn.bind(on_press=self.go_next)
+        btn.bind(on_press=self.ask_permission)
         self.add_widget(btn)
 
-    def go_next(self, instance):
-        self.app.store.put("welcome", shown=True)
-        self.app.show_arduino_question()
-
-
-# ───────────── Arduino Frage ─────────────
-class ArduinoScreen(BoxLayout):
-    def __init__(self, app):
-        super().__init__(orientation="vertical", padding=40, spacing=30)
-        self.app = app
-        Window.clearcolor = DARK_BLUE_BG
-
-        question = Label(
-            text="Möchten Sie die App\nmit dem Arduino durchführen?",
-            color=TEXT_COLOR,
-            font_size=42,
-            halign="center",
-            valign="middle",
-            size_hint=(1, 0.4)
-        )
-        question.bind(size=question.setter("text_size"))
-        self.add_widget(question)
-
-        row = BoxLayout(orientation="horizontal", spacing=40, size_hint=(1, 0.2))
-
-        btn_yes = Button(text="Ja", font_size=36,
-                         background_color=DARK_BLUE_BG,
-                         color=TEXT_COLOR)
-
-        btn_no = Button(text="Nein", font_size=36,
-                        background_color=DARK_BLUE_BG,
-                        color=TEXT_COLOR)
-
-        btn_yes.bind(on_press=self.open_camera)
-        btn_no.bind(on_press=self.open_camera)
-
-        row.add_widget(btn_yes)
-        row.add_widget(btn_no)
-        self.add_widget(row)
-
-    def open_camera(self, instance):
+    def ask_permission(self, instance):
         if request_permissions:
             request_permissions([Permission.CAMERA], self.after_permission)
         else:
-            self.start_camera()
+            self.after_permission(None, [True])
 
     def after_permission(self, permissions, results):
         if all(results):
-            self.start_camera()
+            self.app.store.put("welcome", shown=True)
+            self.app.show_camera()
 
-    def start_camera(self):
-        self.clear_widgets()
 
-        cam = Camera(
+# ───────────── Kamera Screen ─────────────
+class CameraScreen(BoxLayout):
+    def __init__(self, app):
+        super().__init__(orientation="vertical")
+        self.app = app
+        Window.clearcolor = DARK_BLUE_BG
+
+        self.camera = Camera(
             resolution=(640, 480),
             play=True
         )
 
         close_btn = Button(
-            text="Zurück",
+            text="Beenden",
             size_hint=(1, 0.15),
-            font_size=32,
+            font_size=30,
             background_color=DARK_BLUE_BG,
             color=TEXT_COLOR
         )
 
-        layout = BoxLayout(orientation="vertical")
-        layout.add_widget(cam)
-        layout.add_widget(close_btn)
+        close_btn.bind(on_press=self.stop_camera)
 
-        close_btn.bind(on_press=lambda x: self.app.show_arduino_question())
+        self.add_widget(self.camera)
+        self.add_widget(close_btn)
 
-        self.add_widget(layout)
+    def stop_camera(self, instance):
+        self.camera.play = False
+        self.app.show_camera()  # startet neu
 
 
 # ───────────── App ─────────────
@@ -135,11 +100,11 @@ class MainApp(App):
         if not self.store.exists("welcome"):
             return WelcomeScreen(self)
         else:
-            return ArduinoScreen(self)
+            return CameraScreen(self)
 
-    def show_arduino_question(self):
+    def show_camera(self):
         self.root.clear_widgets()
-        self.root.add_widget(ArduinoScreen(self))
+        self.root.add_widget(CameraScreen(self))
 
 
 if __name__ == "__main__":
