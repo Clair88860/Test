@@ -20,7 +20,7 @@ version = 1.0
 entrypoint = main.py
 
 # Benötigte Bibliotheken
-requirements = python3,kivy,pyjnius
+requirements = python3,kivy
 
 # Anzeige
 fullscreen = 0
