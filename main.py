@@ -4,10 +4,11 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.camera import Camera
 from kivy.uix.image import Image
 from kivy.uix.button import Button
-from kivy.graphics import Color, Rectangle, Line, Ellipse
+from kivy.graphics import Color, Rectangle, Ellipse
 from kivy.core.window import Window
 from kivy.clock import Clock
 import time
+import os
 
 try:
     from android.permissions import request_permissions, Permission
@@ -28,10 +29,10 @@ class CameraScreen(Screen):
 
         Window.bind(size=self.update_bg)
 
-        # Kamera (größer, passt in den gelben Rahmen)
+        # Kamera (groß, füllt ganzen Bildschirm)
         self.camera = Camera(play=True)
-        self.camera.size = (Window.width * 0.9, Window.height * 0.6)
-        self.camera.pos = (Window.width * 0.05, Window.height * 0.2)
+        self.camera.size = Window.size
+        self.camera.pos = (0, 0)
         layout.add_widget(self.camera)
 
         # Weißer runder Button rechts mittig
@@ -42,28 +43,14 @@ class CameraScreen(Screen):
                 pos=(Window.width - 180, Window.height / 2 - 60)
             )
 
-        # Gelber Rahmen über dem weißen Blatt
-        with layout.canvas:
-            Color(1, 1, 0, 1)  # Gelb
-            self.paper_frame = Line(
-                rectangle=(Window.width * 0.05, Window.height * 0.2,
-                           Window.width * 0.9, Window.height * 0.6),
-                width=2
-            )
-
         layout.bind(on_touch_down=self.take_photo)
         self.add_widget(layout)
 
     def update_bg(self, *args):
         self.bg.size = Window.size
-        # Rahmen an neue Fenstergröße anpassen
-        self.paper_frame.rectangle = (
-            Window.width * 0.05, Window.height * 0.2,
-            Window.width * 0.9, Window.height * 0.6
-        )
-        # Kamera anpassen
-        self.camera.size = (Window.width * 0.9, Window.height * 0.6)
-        self.camera.pos = (Window.width * 0.05, Window.height * 0.2)
+        # Kamera an neue Fenstergröße anpassen
+        self.camera.size = Window.size
+        self.camera.pos = (0, 0)
         # Weißer Kreis rechts mittig
         self.capture_circle.pos = (Window.width - 180, Window.height / 2 - 60)
 
@@ -73,6 +60,7 @@ class CameraScreen(Screen):
 
         if x <= touch.x <= x + w and y <= touch.y <= y + h:
             filename = f"photo_{int(time.time())}.png"
+            # Speichern im aktuellen Verzeichnis
             self.camera.export_to_png(filename)
             App.get_running_app().last_photo = filename
             self.manager.current = "preview"
@@ -93,14 +81,18 @@ class PreviewScreen(Screen):
         Window.bind(size=self.update_bg)
 
         # Foto anzeigen
-        image = Image(
-            source=App.get_running_app().last_photo,
-            size_hint=(1, 1),
-            allow_stretch=True,
-            keep_ratio=True
-        )
-        image.reload()  # sicherstellen, dass neues Bild geladen wird
-        layout.add_widget(image)
+        photo_path = App.get_running_app().last_photo
+        if photo_path and os.path.exists(photo_path):
+            image = Image(
+                source=photo_path,
+                size_hint=(1, 1),
+                allow_stretch=True,
+                keep_ratio=True
+            )
+            layout.add_widget(image)
+        else:
+            # Falls Datei fehlt, schwarzen Hintergrund anzeigen
+            pass
 
         # Wiederholen Button
         btn_retry = Button(
@@ -112,7 +104,7 @@ class PreviewScreen(Screen):
         btn_retry.bind(on_press=self.go_back)
         layout.add_widget(btn_retry)
 
-        # Fertig Button (macht nichts)
+        # Fertig Button (macht aktuell nichts)
         btn_done = Button(
             text="Fertig",
             size_hint=(0.3, 0.15),
