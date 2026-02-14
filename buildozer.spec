@@ -20,9 +20,9 @@ version = 1.0
 entrypoint = main.py
 
 # Benötigte Bibliotheken
-orientation = landscape
+orientation = portrait
 requirements = python3,kivy,pyjnius,android
-android.permissions = CAMERA,WRITE_EXTERNAL_STORAGE
+android.permissions = CAMERA,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE
 
 # Anzeige
 fullscreen = 0
