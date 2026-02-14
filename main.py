@@ -28,21 +28,21 @@ class CameraScreen(Screen):
 
         Window.bind(size=self.update_bg)
 
-        # Kamera
+        # Kamera (größer, passt in den gelben Rahmen)
         self.camera = Camera(play=True)
-        self.camera.size_hint = (1, 1)
+        self.camera.size = (Window.width * 0.9, Window.height * 0.6)
+        self.camera.pos = (Window.width * 0.05, Window.height * 0.2)
         layout.add_widget(self.camera)
 
-        # Weißer runder Button
+        # Weißer runder Button rechts mittig
         with layout.canvas:
             Color(1, 1, 1, 1)
             self.capture_circle = Ellipse(
                 size=(120, 120),
-                pos=(Window.width / 2 - 60, 40)
+                pos=(Window.width - 180, Window.height / 2 - 60)
             )
 
         # Gelber Rahmen über dem weißen Blatt
-        # Position & Größe anpassen nach Wunsch
         with layout.canvas:
             Color(1, 1, 0, 1)  # Gelb
             self.paper_frame = Line(
@@ -61,6 +61,11 @@ class CameraScreen(Screen):
             Window.width * 0.05, Window.height * 0.2,
             Window.width * 0.9, Window.height * 0.6
         )
+        # Kamera anpassen
+        self.camera.size = (Window.width * 0.9, Window.height * 0.6)
+        self.camera.pos = (Window.width * 0.05, Window.height * 0.2)
+        # Weißer Kreis rechts mittig
+        self.capture_circle.pos = (Window.width - 180, Window.height / 2 - 60)
 
     def take_photo(self, instance, touch):
         x, y = self.capture_circle.pos
@@ -80,19 +85,24 @@ class PreviewScreen(Screen):
         self.clear_widgets()
         layout = FloatLayout()
 
+        # Schwarzer Hintergrund
         with layout.canvas:
             Color(0, 0, 0, 1)
             self.bg = Rectangle(size=Window.size, pos=(0, 0))
 
         Window.bind(size=self.update_bg)
 
+        # Foto anzeigen
         image = Image(
             source=App.get_running_app().last_photo,
-            size_hint=(1, 1)
+            size_hint=(1, 1),
+            allow_stretch=True,
+            keep_ratio=True
         )
+        image.reload()  # sicherstellen, dass neues Bild geladen wird
         layout.add_widget(image)
 
-        # Wiederholen
+        # Wiederholen Button
         btn_retry = Button(
             text="Wiederholen",
             size_hint=(0.3, 0.15),
@@ -102,7 +112,7 @@ class PreviewScreen(Screen):
         btn_retry.bind(on_press=self.go_back)
         layout.add_widget(btn_retry)
 
-        # Fertig (macht nichts)
+        # Fertig Button (macht nichts)
         btn_done = Button(
             text="Fertig",
             size_hint=(0.3, 0.15),
