@@ -4,6 +4,7 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.camera import Camera
 from kivy.uix.image import Image
 from kivy.uix.button import Button
+from kivy.uix.label import Label
 from kivy.graphics import Color, Rectangle, Ellipse
 from kivy.core.window import Window
 from kivy.clock import Clock
@@ -15,12 +16,14 @@ try:
 except ImportError:
     request_permissions = None
 
+
 # ───────────── CAMERA SCREEN ─────────────
 class CameraScreen(Screen):
 
     def on_enter(self):
         self.clear_widgets()
         layout = FloatLayout()
+        self.layout = layout  # speichern, um später Hilfe anzuzeigen
 
         # Schwarzer Hintergrund
         with layout.canvas:
@@ -29,10 +32,12 @@ class CameraScreen(Screen):
 
         Window.bind(size=self.update_bg)
 
-        # Kamera (groß, füllt ganzen Bildschirm)
+        # Kamera vergrößert (etwas breiter + länger)
         self.camera = Camera(play=True)
-        self.camera.size = Window.size
-        self.camera.pos = (0, 0)
+        cam_width = Window.width + 50
+        cam_height = Window.height + 50
+        self.camera.size = (cam_width, cam_height)
+        self.camera.pos = (-25, -25)  # mittig verschieben
         layout.add_widget(self.camera)
 
         # Weißer runder Button rechts mittig
@@ -43,27 +48,65 @@ class CameraScreen(Screen):
                 pos=(Window.width - 180, Window.height / 2 - 60)
             )
 
+        # Hilfe-Button links oben
+        btn_help = Button(
+            text="Hilfe",
+            size_hint=(0.2, 0.1),
+            pos_hint={"x": 0.02, "y": 0.88},
+            background_color=(0.8, 0.8, 0.8, 1)
+        )
+        btn_help.bind(on_press=self.show_help)
+        layout.add_widget(btn_help)
+
         layout.bind(on_touch_down=self.take_photo)
         self.add_widget(layout)
 
     def update_bg(self, *args):
         self.bg.size = Window.size
         # Kamera an neue Fenstergröße anpassen
-        self.camera.size = Window.size
-        self.camera.pos = (0, 0)
+        cam_width = Window.width + 50
+        cam_height = Window.height + 50
+        self.camera.size = (cam_width, cam_height)
+        self.camera.pos = (-25, -25)
         # Weißer Kreis rechts mittig
         self.capture_circle.pos = (Window.width - 180, Window.height / 2 - 60)
 
     def take_photo(self, instance, touch):
         x, y = self.capture_circle.pos
         w, h = self.capture_circle.size
-
         if x <= touch.x <= x + w and y <= touch.y <= y + h:
-            filename = f"photo_{int(time.time())}.png"
-            # Speichern im aktuellen Verzeichnis
+            filename = os.path.join(App.get_running_app().user_data_dir,
+                                    f"photo_{int(time.time())}.png")
             self.camera.export_to_png(filename)
             App.get_running_app().last_photo = filename
             self.manager.current = "preview"
+
+    def show_help(self, instance):
+        self.layout.clear_widgets()
+        with self.layout.canvas:
+            Color(0, 0, 0, 1)
+            Rectangle(size=Window.size, pos=(0, 0))
+        # Hilfe Text
+        lbl = Label(
+            text="Hilfe",
+            font_size=50,
+            color=(1, 1, 1, 1),
+            pos_hint={"center_x": 0.5, "center_y": 0.6}
+        )
+        self.layout.add_widget(lbl)
+        # K-Button unten, zurück zur Kamera
+        btn_back = Button(
+            text="K",
+            size_hint=(0.2, 0.1),
+            pos_hint={"center_x": 0.5, "y": 0.05},
+            background_color=(0.8, 0.8, 0.8, 1)
+        )
+        btn_back.bind(on_press=self.back_to_camera)
+        self.layout.add_widget(btn_back)
+
+    def back_to_camera(self, instance):
+        self.layout.clear_widgets()
+        self.on_enter()
 
 
 # ───────────── PREVIEW SCREEN ─────────────
@@ -76,9 +119,7 @@ class PreviewScreen(Screen):
         # Schwarzer Hintergrund
         with layout.canvas:
             Color(0, 0, 0, 1)
-            self.bg = Rectangle(size=Window.size, pos=(0, 0))
-
-        Window.bind(size=self.update_bg)
+            Rectangle(size=Window.size, pos=(0, 0))
 
         # Foto anzeigen
         photo_path = App.get_running_app().last_photo
@@ -90,9 +131,6 @@ class PreviewScreen(Screen):
                 keep_ratio=True
             )
             layout.add_widget(image)
-        else:
-            # Falls Datei fehlt, schwarzen Hintergrund anzeigen
-            pass
 
         # Wiederholen Button
         btn_retry = Button(
@@ -104,7 +142,7 @@ class PreviewScreen(Screen):
         btn_retry.bind(on_press=self.go_back)
         layout.add_widget(btn_retry)
 
-        # Fertig Button (macht aktuell nichts)
+        # Fertig Button
         btn_done = Button(
             text="Fertig",
             size_hint=(0.3, 0.15),
@@ -114,9 +152,6 @@ class PreviewScreen(Screen):
         layout.add_widget(btn_done)
 
         self.add_widget(layout)
-
-    def update_bg(self, *args):
-        self.bg.size = Window.size
 
     def go_back(self, instance):
         self.manager.current = "camera"
@@ -132,7 +167,6 @@ class MainApp(App):
         self.sm.add_widget(PreviewScreen(name="preview"))
 
         Clock.schedule_once(self.ask_permission, 0.5)
-
         return self.sm
 
     def ask_permission(self, dt):
