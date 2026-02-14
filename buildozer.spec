@@ -22,7 +22,7 @@ entrypoint = main.py
 # Benötigte Bibliotheken
 orientation = landscape
 requirements = python3,kivy,pyjnius,android
-android.permissions = CAMERA,WRITE_EXTERNAL_STORAGE
+android.permissions = CAMERA
 
 # Anzeige
 fullscreen = 0
