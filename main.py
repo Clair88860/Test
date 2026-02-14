@@ -4,7 +4,7 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.camera import Camera
 from kivy.uix.image import Image
 from kivy.uix.button import Button
-from kivy.graphics import Color, Rectangle, Ellipse
+from kivy.graphics import Color, Rectangle, Line, Ellipse
 from kivy.core.window import Window
 from kivy.clock import Clock
 import time
@@ -13,7 +13,6 @@ try:
     from android.permissions import request_permissions, Permission
 except ImportError:
     request_permissions = None
-
 
 # ───────────── CAMERA SCREEN ─────────────
 class CameraScreen(Screen):
@@ -42,11 +41,26 @@ class CameraScreen(Screen):
                 pos=(Window.width / 2 - 60, 40)
             )
 
+        # Gelber Rahmen über dem weißen Blatt
+        # Position & Größe anpassen nach Wunsch
+        with layout.canvas:
+            Color(1, 1, 0, 1)  # Gelb
+            self.paper_frame = Line(
+                rectangle=(Window.width * 0.05, Window.height * 0.2,
+                           Window.width * 0.9, Window.height * 0.6),
+                width=2
+            )
+
         layout.bind(on_touch_down=self.take_photo)
         self.add_widget(layout)
 
     def update_bg(self, *args):
         self.bg.size = Window.size
+        # Rahmen an neue Fenstergröße anpassen
+        self.paper_frame.rectangle = (
+            Window.width * 0.05, Window.height * 0.2,
+            Window.width * 0.9, Window.height * 0.6
+        )
 
     def take_photo(self, instance, touch):
         x, y = self.capture_circle.pos
@@ -115,7 +129,6 @@ class MainApp(App):
         self.sm.add_widget(CameraScreen(name="camera"))
         self.sm.add_widget(PreviewScreen(name="preview"))
 
-        # Erst schwarzer Screen anzeigen
         Clock.schedule_once(self.ask_permission, 0.5)
 
         return self.sm
