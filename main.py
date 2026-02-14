@@ -1,12 +1,10 @@
 from kivy.app import App
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.label import Label
-from kivy.uix.button import Button
 from kivy.uix.camera import Camera
 from kivy.uix.image import Image
+from kivy.uix.button import Button
 from kivy.graphics import Color, Rectangle, Ellipse
-from kivy.storage.jsonstore import JsonStore
 from kivy.core.window import Window
 from kivy.clock import Clock
 import time
@@ -17,57 +15,9 @@ except ImportError:
     request_permissions = None
 
 
-# ───────────── START SCREEN ─────────────
-class StartScreen(Screen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        layout = FloatLayout()
-
-        # Schwarzer Hintergrund
-        with layout.canvas:
-            Color(0, 0, 0, 1)
-            self.bg = Rectangle(size=Window.size, pos=(0, 0))
-
-        Window.bind(size=self.update_bg)
-
-        label = Label(
-            text="Hallo!\n\nWillkommen zur Kamera-App",
-            font_size=50,
-            rotation=90,
-            size_hint=(None, None),
-            size=(600, 400),
-            pos_hint={"center_x": 0.5, "center_y": 0.6}
-        )
-        layout.add_widget(label)
-
-        btn = Button(
-            text="Weiter",
-            size_hint=(0.3, 0.15),
-            pos_hint={"center_x": 0.5, "center_y": 0.3},
-            background_color=(0.2, 0.2, 0.2, 1)
-        )
-        btn.bind(on_press=self.ask_permission)
-        layout.add_widget(btn)
-
-        self.add_widget(layout)
-
-    def update_bg(self, *args):
-        self.bg.size = Window.size
-
-    def ask_permission(self, *_):
-        if request_permissions:
-            request_permissions([Permission.CAMERA], self.permission_result)
-        else:
-            self.permission_result(None, [True])
-
-    def permission_result(self, permissions, results):
-        if all(results):
-            App.get_running_app().store.put("welcome", shown=True)
-            self.manager.current = "camera"
-
-
 # ───────────── CAMERA SCREEN ─────────────
 class CameraScreen(Screen):
+
     def on_enter(self):
         self.clear_widgets()
         layout = FloatLayout()
@@ -93,7 +43,6 @@ class CameraScreen(Screen):
             )
 
         layout.bind(on_touch_down=self.take_photo)
-
         self.add_widget(layout)
 
     def update_bg(self, *args):
@@ -112,25 +61,24 @@ class CameraScreen(Screen):
 
 # ───────────── PREVIEW SCREEN ─────────────
 class PreviewScreen(Screen):
+
     def on_enter(self):
         self.clear_widgets()
         layout = FloatLayout()
 
-        # Schwarzer Hintergrund
         with layout.canvas:
             Color(0, 0, 0, 1)
             self.bg = Rectangle(size=Window.size, pos=(0, 0))
 
         Window.bind(size=self.update_bg)
 
-        # Bild anzeigen
         image = Image(
             source=App.get_running_app().last_photo,
             size_hint=(1, 1)
         )
         layout.add_widget(image)
 
-        # Wiederholen Button
+        # Wiederholen
         btn_retry = Button(
             text="Wiederholen",
             size_hint=(0.3, 0.15),
@@ -140,7 +88,7 @@ class PreviewScreen(Screen):
         btn_retry.bind(on_press=self.go_back)
         layout.add_widget(btn_retry)
 
-        # Fertig Button (macht nichts)
+        # Fertig (macht nichts)
         btn_done = Button(
             text="Fertig",
             size_hint=(0.3, 0.15),
@@ -163,19 +111,26 @@ class MainApp(App):
     last_photo = None
 
     def build(self):
-        self.store = JsonStore("app_state.json")
+        self.sm = ScreenManager()
+        self.sm.add_widget(CameraScreen(name="camera"))
+        self.sm.add_widget(PreviewScreen(name="preview"))
 
-        sm = ScreenManager()
-        sm.add_widget(StartScreen(name="start"))
-        sm.add_widget(CameraScreen(name="camera"))
-        sm.add_widget(PreviewScreen(name="preview"))
+        # Erst schwarzer Screen anzeigen
+        Clock.schedule_once(self.ask_permission, 0.5)
 
-        if self.store.exists("welcome"):
-            sm.current = "camera"
+        return self.sm
+
+    def ask_permission(self, dt):
+        if request_permissions:
+            request_permissions([Permission.CAMERA], self.permission_result)
         else:
-            sm.current = "start"
+            self.permission_result(None, [True])
 
-        return sm
+    def permission_result(self, permissions, results):
+        if all(results):
+            self.sm.current = "camera"
+        else:
+            print("Kamera-Berechtigung verweigert")
 
 
 if __name__ == "__main__":
