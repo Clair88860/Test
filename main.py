@@ -7,8 +7,8 @@ from kivy.uix.camera import Camera
 from kivy.uix.image import Image
 from kivy.graphics import Color, Rectangle, Ellipse
 from kivy.storage.jsonstore import JsonStore
-from kivy.clock import Clock
 from kivy.core.window import Window
+from kivy.clock import Clock
 import time
 
 try:
@@ -23,9 +23,12 @@ class StartScreen(Screen):
         super().__init__(**kwargs)
         layout = FloatLayout()
 
+        # Schwarzer Hintergrund
         with layout.canvas:
             Color(0, 0, 0, 1)
-            Rectangle(size=Window.size)
+            self.bg = Rectangle(size=Window.size, pos=(0, 0))
+
+        Window.bind(size=self.update_bg)
 
         label = Label(
             text="Hallo!\n\nWillkommen zur Kamera-App",
@@ -48,6 +51,9 @@ class StartScreen(Screen):
 
         self.add_widget(layout)
 
+    def update_bg(self, *args):
+        self.bg.size = Window.size
+
     def ask_permission(self, *_):
         if request_permissions:
             request_permissions([Permission.CAMERA], self.permission_result)
@@ -66,10 +72,14 @@ class CameraScreen(Screen):
         self.clear_widgets()
         layout = FloatLayout()
 
+        # Schwarzer Hintergrund
         with layout.canvas:
             Color(0, 0, 0, 1)
-            Rectangle(size=Window.size)
+            self.bg = Rectangle(size=Window.size, pos=(0, 0))
 
+        Window.bind(size=self.update_bg)
+
+        # Kamera
         self.camera = Camera(play=True)
         self.camera.size_hint = (1, 1)
         layout.add_widget(self.camera)
@@ -79,17 +89,21 @@ class CameraScreen(Screen):
             Color(1, 1, 1, 1)
             self.capture_circle = Ellipse(
                 size=(120, 120),
-                pos=(Window.width/2 - 60, 40)
+                pos=(Window.width / 2 - 60, 40)
             )
 
         layout.bind(on_touch_down=self.take_photo)
+
         self.add_widget(layout)
+
+    def update_bg(self, *args):
+        self.bg.size = Window.size
 
     def take_photo(self, instance, touch):
         x, y = self.capture_circle.pos
         w, h = self.capture_circle.size
 
-        if x <= touch.x <= x+w and y <= touch.y <= y+h:
+        if x <= touch.x <= x + w and y <= touch.y <= y + h:
             filename = f"photo_{int(time.time())}.png"
             self.camera.export_to_png(filename)
             App.get_running_app().last_photo = filename
@@ -102,25 +116,31 @@ class PreviewScreen(Screen):
         self.clear_widgets()
         layout = FloatLayout()
 
+        # Schwarzer Hintergrund
         with layout.canvas:
             Color(0, 0, 0, 1)
-            Rectangle(size=Window.size)
+            self.bg = Rectangle(size=Window.size, pos=(0, 0))
 
+        Window.bind(size=self.update_bg)
+
+        # Bild anzeigen
         image = Image(
             source=App.get_running_app().last_photo,
             size_hint=(1, 1)
         )
         layout.add_widget(image)
 
+        # Wiederholen Button
         btn_retry = Button(
             text="Wiederholen",
             size_hint=(0.3, 0.15),
             pos_hint={"x": 0.1, "y": 0.05},
             background_color=(0.2, 0.2, 0.2, 1)
         )
-        btn_retry.bind(on_press=lambda *_: self.manager.current = "camera")
+        btn_retry.bind(on_press=self.go_back)
         layout.add_widget(btn_retry)
 
+        # Fertig Button (macht nichts)
         btn_done = Button(
             text="Fertig",
             size_hint=(0.3, 0.15),
@@ -130,6 +150,12 @@ class PreviewScreen(Screen):
         layout.add_widget(btn_done)
 
         self.add_widget(layout)
+
+    def update_bg(self, *args):
+        self.bg.size = Window.size
+
+    def go_back(self, instance):
+        self.manager.current = "camera"
 
 
 # ───────────── MAIN APP ─────────────
