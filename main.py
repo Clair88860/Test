@@ -7,8 +7,6 @@ from kivy.uix.camera import Camera
 from kivy.uix.image import Image
 from kivy.uix.button import Button
 from kivy.uix.label import Label
-from kivy.uix.textinput import TextInput
-from kivy.uix.popup import Popup
 from kivy.graphics import Color, Ellipse
 from kivy.core.window import Window
 from kivy.uix.scrollview import ScrollView
@@ -20,10 +18,23 @@ class Dashboard(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(orientation="horizontal", **kwargs)
 
-        # -------- Sidebar --------
-        self.sidebar = BoxLayout(orientation="vertical",
-                                 size_hint=(0.2, 1))
+        # ---------- Ordner ----------
+        self.photos_dir = os.path.join(
+            App.get_running_app().user_data_dir,
+            "photos"
+        )
+        os.makedirs(self.photos_dir, exist_ok=True)
+
+        # ---------- Sidebar ----------
+        self.sidebar = BoxLayout(
+            orientation="vertical",
+            size_hint=(0.15, 1)
+        )
         self.add_widget(self.sidebar)
+
+        Button(text="?", size_hint=(1, 0.1),
+               on_press=self.show_help).\
+            bind(on_press=self.show_help)
 
         btn_help = Button(text="?", size_hint=(1, 0.1))
         btn_help.bind(on_press=self.show_help)
@@ -39,93 +50,54 @@ class Dashboard(BoxLayout):
 
         self.sidebar.add_widget(Label())
 
-        # -------- Rechte Fläche --------
+        # ---------- Content ----------
         self.content = FloatLayout()
         self.add_widget(self.content)
-
-        # Ordner für Fotos
-        self.photos_dir = os.path.join(App.get_running_app().user_data_dir, "photos")
-        os.makedirs(self.photos_dir, exist_ok=True)
 
         self.show_camera()
 
     # ==================================================
-    # Kamera
+    # Kamera 16:9
     # ==================================================
     def show_camera(self, *args):
         self.content.clear_widgets()
         self.content.canvas.clear()
 
-        self.camera = Camera(play=True)
-        self.camera.size_hint = (1, 1)
+        width = Window.width * 0.85
+        height = width * 9 / 16
+
+        self.camera = Camera(play=True,
+                             resolution=(1280, 720))
+        self.camera.size = (width, height)
+        self.camera.pos = (0, (Window.height - height) / 2)
+
         self.content.add_widget(self.camera)
 
         # Auslöser
         with self.content.canvas:
             Color(1, 1, 1, 1)
             self.capture_circle = Ellipse(
-                size=(120, 120),
-                pos=(Window.width*0.8 - 150, Window.height/2 - 60)
+                size=(100, 100),
+                pos=(width - 120,
+                     Window.height/2 - 50)
             )
 
         self.content.bind(on_touch_down=self.take_photo)
 
+    # ==================================================
+    # Foto aufnehmen
+    # ==================================================
     def take_photo(self, instance, touch):
         x, y = self.capture_circle.pos
         w, h = self.capture_circle.size
 
         if x <= touch.x <= x + w and y <= touch.y <= y + h:
-            filename = os.path.join(
+            temp_path = os.path.join(
                 self.photos_dir,
-                f"photo_{int(time.time())}.png"
+                "temp.png"
             )
-            self.camera.export_to_png(filename)
-            self.show_preview(filename)
-
-    # ==================================================
-    # Hilfe
-    # ==================================================
-    def show_help(self, *args):
-        self.content.clear_widgets()
-        self.content.canvas.clear()
-
-        label = Label(
-            text="Hilfe",
-            font_size=50,
-            pos_hint={"center_x": 0.5, "center_y": 0.5}
-        )
-        self.content.add_widget(label)
-
-    # ==================================================
-    # Galerie
-    # ==================================================
-    def show_gallery(self, *args):
-        self.content.clear_widgets()
-        self.content.canvas.clear()
-
-        scroll = ScrollView(size_hint=(1, 1))
-        grid = GridLayout(cols=3, spacing=10,
-                          size_hint_y=None)
-        grid.bind(minimum_height=grid.setter("height"))
-
-        scroll.add_widget(grid)
-        self.content.add_widget(scroll)
-
-        files = sorted(os.listdir(self.photos_dir), reverse=True)
-
-        for file in files:
-            if file.endswith(".png"):
-                path = os.path.join(self.photos_dir, file)
-
-                btn = Button(size_hint_y=None,
-                             height=150,
-                             background_normal=path,
-                             background_down=path)
-
-                btn.bind(on_press=lambda inst, p=path:
-                         self.show_preview(p))
-
-                grid.add_widget(btn)
+            self.camera.export_to_png(temp_path)
+            self.show_preview(temp_path)
 
     # ==================================================
     # Vorschau
@@ -138,66 +110,130 @@ class Dashboard(BoxLayout):
         self.content.add_widget(layout)
 
         img = Image(source=path,
-                    size_hint=(1, 1),
-                    allow_stretch=True)
+                    allow_stretch=True,
+                    keep_ratio=True)
         layout.add_widget(img)
 
         # Wiederholen
-        btn_retry = Button(text="Wiederholen",
-                           size_hint=(0.3, 0.15),
-                           pos_hint={"x": 0.1, "y": 0.05})
-        btn_retry.bind(on_press=lambda x: self.show_camera())
+        btn_retry = Button(
+            text="Wiederholen",
+            size_hint=(0.3, 0.15),
+            pos_hint={"x": 0.1, "y": 0.05}
+        )
+        btn_retry.bind(on_press=lambda x:
+                       self.show_camera())
         layout.add_widget(btn_retry)
 
-        # Fertig
-        btn_done = Button(text="Fertig",
-                          size_hint=(0.3, 0.15),
-                          pos_hint={"x": 0.6, "y": 0.05})
-        btn_done.bind(on_press=lambda x: self.save_popup(path))
-        layout.add_widget(btn_done)
-
-    # ==================================================
-    # Speichern
-    # ==================================================
-    def save_popup(self, photo_path):
-
-        content = FloatLayout()
-
-        textinput = TextInput(
-            hint_text="Dateiname eingeben",
-            size_hint=(0.8, 0.2),
-            pos_hint={"x": 0.1, "y": 0.5}
-        )
-
+        # Speichern
         btn_save = Button(
             text="Speichern",
-            size_hint=(0.5, 0.2),
-            pos_hint={"x": 0.25, "y": 0.2}
+            size_hint=(0.3, 0.15),
+            pos_hint={"x": 0.6, "y": 0.05}
+        )
+        btn_save.bind(on_press=lambda x:
+                      self.save_auto(path))
+        layout.add_widget(btn_save)
+
+    # ==================================================
+    # Automatisch speichern 0001, 0002 ...
+    # ==================================================
+    def save_auto(self, temp_path):
+
+        existing = sorted([
+            f for f in os.listdir(self.photos_dir)
+            if f.endswith(".png") and f != "temp.png"
+        ])
+
+        next_number = len(existing) + 1
+        filename = f"{next_number:04d}.png"
+
+        save_path = os.path.join(
+            self.photos_dir,
+            filename
         )
 
-        content.add_widget(textinput)
-        content.add_widget(btn_save)
+        os.rename(temp_path, save_path)
 
-        popup = Popup(
-            title="Speichern",
-            content=content,
-            size_hint=(0.8, 0.5)
+        # Zurück zur Kamera
+        self.show_camera()
+
+    # ==================================================
+    # Hilfe
+    # ==================================================
+    def show_help(self, *args):
+        self.content.clear_widgets()
+        self.content.canvas.clear()
+
+        label = Label(
+            text="Hilfe",
+            font_size=50,
+            pos_hint={"center_x": 0.5,
+                      "center_y": 0.5}
+        )
+        self.content.add_widget(label)
+
+    # ==================================================
+    # Galerie
+    # ==================================================
+    def show_gallery(self, *args):
+        self.content.clear_widgets()
+        self.content.canvas.clear()
+
+        scroll = ScrollView()
+        grid = GridLayout(
+            cols=2,
+            spacing=20,
+            size_hint_y=None
+        )
+        grid.bind(minimum_height=grid.setter("height"))
+
+        scroll.add_widget(grid)
+        self.content.add_widget(scroll)
+
+        files = sorted(
+            [f for f in os.listdir(self.photos_dir)
+             if f.endswith(".png") and f != "temp.png"]
         )
 
-        def save_file(instance):
-            name = textinput.text.strip()
-            if name:
-                save_path = os.path.join(
-                    App.get_running_app().user_data_dir,
-                    f"{name}.png"
-                )
-                with open(photo_path, "rb") as f_src:
-                    with open(save_path, "wb") as f_dst:
-                        f_dst.write(f_src.read())
-                popup.dismiss()
+        for file in files:
+            path = os.path.join(self.photos_dir, file)
 
-        btn_save.bind(on_press=save_file)
-        popup.open()
+            btn = Button(
+                size_hint_y=None,
+                height=250,
+                background_normal=path,
+                background_down=path
+            )
+
+            btn.bind(on_press=lambda inst, p=path:
+                     self.show_gallery_preview(p))
+
+            grid.add_widget(btn)
+
+    # ==================================================
+    # Galerie-Vorschau
+    # ==================================================
+    def show_gallery_preview(self, path):
+        self.content.clear_widgets()
+        self.content.canvas.clear()
+
+        layout = FloatLayout()
+        self.content.add_widget(layout)
+
+        img = Image(source=path,
+                    allow_stretch=True,
+                    keep_ratio=True)
+        layout.add_widget(img)
+
+        number = os.path.basename(path).replace(".png", "")
+
+        label = Label(
+            text=number,
+            size_hint=(1, 0.1),
+            pos_hint={"center_x": 0.5,
+                      "y": 0}
+        )
+        layout.add_widget(label)
 
 
 class MainApp(App):
