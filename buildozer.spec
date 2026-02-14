@@ -20,12 +20,13 @@ version = 1.0
 entrypoint = main.py
 
 # Benötigte Bibliotheken
+orientation = landscape
 requirements = python3,kivy,pyjnius,android
 android.permissions = CAMERA,WRITE_EXTERNAL_STORAGE
 
 # Anzeige
 fullscreen = 0
-orientation = portrait
+
 
 # Android SDK / NDK
 android.api = 33
