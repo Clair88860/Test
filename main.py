@@ -13,7 +13,7 @@ from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.popup import Popup
 from kivy.uix.textinput import TextInput
-from kivy.core.window import Window
+from kivy.graphics import PushMatrix, PopMatrix, Rotate
 from kivy.storage.jsonstore import JsonStore
 
 
@@ -27,11 +27,11 @@ class CameraApp(App):
         if not os.path.exists(self.photos_dir):
             os.makedirs(self.photos_dir)
 
-        self.photo_counter = self.get_next_number()
-
         self.root = BoxLayout(orientation="vertical")
 
-        # -------- TOP NAVIGATION --------
+        # =======================
+        # TOP NAVIGATION
+        # =======================
         nav = BoxLayout(size_hint_y=0.1)
 
         nav.add_widget(Button(text="?", on_press=self.show_help))
@@ -41,31 +41,52 @@ class CameraApp(App):
 
         self.root.add_widget(nav)
 
-        # -------- CONTENT --------
+        # CONTENT BEREICH
         self.content = FloatLayout()
         self.root.add_widget(self.content)
 
         self.show_camera()
 
-        Window.bind(on_resize=self.update_orientation)
-
         return self.root
 
     # =========================================================
-    # CAMERA VIEW
+    # ===================== KAMERA ============================
     # =========================================================
 
     def show_camera(self, *args):
 
         self.content.clear_widgets()
 
+        # -------------------------------
+        # >>>>> HIER IST DIE KAMERA <<<<<
+        # -------------------------------
+
         self.camera = Camera(play=True, resolution=(1280, 720))
         self.camera.size_hint = (1, 0.9)
         self.camera.pos_hint = {"top": 1}
+
+        # =========================================================
+        # 🔥🔥🔥 HIER WIRD DIE KAMERA 90° NACH RECHTS GEDREHT 🔥🔥🔥
+        # =========================================================
+        with self.camera.canvas.before:
+            PushMatrix()
+            self.rotation = Rotate(
+                angle=-90,   # ← HIER WIRD GEDREHT (90° NACH RECHTS)
+                origin=self.camera.center
+            )
+
+        with self.camera.canvas.after:
+            PopMatrix()
+
+        # Rotation dynamisch aktualisieren
+        self.camera.bind(pos=self.update_rotation_origin,
+                         size=self.update_rotation_origin)
+
+        # =========================================================
+
         self.content.add_widget(self.camera)
 
-        self.update_orientation()
-
+        # Runder weißer Kamera Button
         capture_btn = Button(
             size_hint=(None, None),
             size=(90, 90),
@@ -77,27 +98,28 @@ class CameraApp(App):
         capture_btn.bind(on_press=self.take_photo)
         self.content.add_widget(capture_btn)
 
-    def update_orientation(self, *args):
-        if hasattr(self, "camera"):
-            if Window.height > Window.width:
-                self.camera.rotation = -90
-            else:
-                self.camera.rotation = 0
+    def update_rotation_origin(self, *args):
+        if hasattr(self, "rotation"):
+            self.rotation.origin = self.camera.center
 
     def take_photo(self, *args):
+        try:
+            number = self.get_next_number()
+            filename = f"{number:04}.png"
+            path = os.path.join(self.photos_dir, filename)
 
-        temp_path = os.path.join(self.photos_dir, "temp.png")
-        self.camera.export_to_png(temp_path)
+            self.camera.export_to_png(path)
 
-        number = f"{self.photo_counter:04}"
-        final_path = os.path.join(self.photos_dir, f"{number}.png")
-        shutil.move(temp_path, final_path)
+            self.store.put(
+                str(number),
+                name=f"{number:04}",
+                date=str(datetime.now())
+            )
 
-        self.store.put(number, name=number, date=str(datetime.now()))
+            self.show_camera()
 
-        self.photo_counter += 1
-
-        self.show_camera()
+        except Exception as e:
+            print("Fehler beim Speichern:", e)
 
     def get_next_number(self):
         files = [
@@ -133,115 +155,10 @@ class CameraApp(App):
                 height=350
             )
 
-            img.bind(on_press=lambda x, p=path: self.open_image_view(p))
             grid.add_widget(img)
 
         scroll.add_widget(grid)
         self.content.add_widget(scroll)
-
-    # =========================================================
-    # IMAGE VIEW
-    # =========================================================
-
-    def open_image_view(self, path):
-
-        self.content.clear_widgets()
-
-        layout = FloatLayout()
-
-        img = AsyncImage(
-            source=path,
-            allow_stretch=True,
-            keep_ratio=True,
-            size_hint=(1, 0.85),
-            pos_hint={"top": 1}
-        )
-        layout.add_widget(img)
-
-        number = os.path.basename(path).replace(".png", "")
-
-        name = self.store.get(number)["name"] if self.store.exists(number) else number
-
-        bottom = BoxLayout(
-            size_hint=(1, 0.15),
-            pos_hint={"y": 0}
-        )
-
-        name_label = Label(text=name)
-        info_btn = Button(text="i", size_hint=(None, 1), width=60)
-
-        info_btn.bind(on_press=lambda x: self.show_info_popup(number, path))
-
-        bottom.add_widget(name_label)
-        bottom.add_widget(info_btn)
-
-        layout.add_widget(bottom)
-
-        self.content.add_widget(layout)
-
-    # =========================================================
-    # INFO POPUP
-    # =========================================================
-
-    def show_info_popup(self, number, path):
-
-        box = BoxLayout(orientation="vertical", spacing=10, padding=20)
-
-        name_input = TextInput(text=self.store.get(number)["name"])
-        box.add_widget(name_input)
-
-        date_label = Label(text=self.store.get(number)["date"])
-        box.add_widget(date_label)
-
-        rename_btn = Button(text="Speichern")
-        delete_btn = Button(text="Foto löschen")
-
-        box.add_widget(rename_btn)
-        box.add_widget(delete_btn)
-
-        popup = Popup(title="Info", content=box, size_hint=(0.8, 0.6))
-
-        rename_btn.bind(on_press=lambda x: self.rename_photo(number, name_input.text, popup))
-        delete_btn.bind(on_press=lambda x: self.confirm_delete(number, path, popup))
-
-        popup.open()
-
-    def rename_photo(self, number, new_name, popup):
-        data = self.store.get(number)
-        self.store.put(number, name=new_name, date=data["date"])
-        popup.dismiss()
-        self.show_gallery()
-
-    def confirm_delete(self, number, path, popup):
-
-        confirm_box = BoxLayout(orientation="vertical")
-
-        confirm_box.add_widget(Label(text="Wirklich löschen?"))
-
-        btns = BoxLayout()
-        yes = Button(text="Ja")
-        no = Button(text="Nein")
-
-        btns.add_widget(yes)
-        btns.add_widget(no)
-
-        confirm_box.add_widget(btns)
-
-        confirm_popup = Popup(title="Sicher?", content=confirm_box, size_hint=(0.7, 0.4))
-
-        yes.bind(on_press=lambda x: self.delete_photo(number, path, popup, confirm_popup))
-        no.bind(on_press=confirm_popup.dismiss)
-
-        confirm_popup.open()
-
-    def delete_photo(self, number, path, popup, confirm_popup):
-        os.remove(path)
-        if self.store.exists(number):
-            self.store.delete(number)
-
-        confirm_popup.dismiss()
-        popup.dismiss()
-        self.show_gallery()
 
     # =========================================================
     # HELP
@@ -252,7 +169,7 @@ class CameraApp(App):
         self.content.add_widget(Label(text="Hilfe"))
 
     # =========================================================
-    # EXTRA MENU
+    # EXTRA
     # =========================================================
 
     def show_extra(self, *args):
@@ -272,16 +189,6 @@ class CameraApp(App):
         nein2 = Button(text="Nein", size_hint=(None,None), size=(100,50))
         layout.add_widget(ja2)
         layout.add_widget(nein2)
-
-        def toggle(key, value, active, inactive):
-            active.background_color = (0,1,0,1)
-            inactive.background_color = (1,1,1,1)
-            self.store.put(key, value=value)
-
-        ja1.bind(on_press=lambda x: toggle("arduino","ja",ja1,nein1))
-        nein1.bind(on_press=lambda x: toggle("arduino","nein",nein1,ja1))
-        ja2.bind(on_press=lambda x: toggle("winkel","ja",ja2,nein2))
-        nein2.bind(on_press=lambda x: toggle("winkel","nein",nein2,ja2))
 
         self.content.add_widget(layout)
 
