@@ -38,12 +38,38 @@ class CameraApp(App):
         self.content = FloatLayout()
         self.root.add_widget(self.content)
 
-        self.show_camera()
+        # Kamera prüfen → Kamera öffnen oder Hilfe
+        if self.check_camera_permission():
+            self.show_camera()
+        else:
+            self.show_help()
+
         return self.root
+
+    # ========================= CAMERA PERMISSION CHECK =========================
+    def check_camera_permission(self):
+        try:
+            cam = Camera(play=True, resolution=(1280, 720))
+            cam.play = False  # nur prüfen
+            return True
+        except Exception:
+            return False
+
+    # ========================= HELP =========================
+    def show_help(self, *args):
+        self.content.clear_widgets()
+        layout = BoxLayout(orientation="vertical", padding=20, spacing=20)
+        layout.add_widget(Label(text="Hilfe", font_size=30))
+        layout.add_widget(Label(text="Willkommen zur Kamera-App!"))
+        self.content.add_widget(layout)
 
     # ========================= CAMERA =========================
     def show_camera(self, *args):
         self.content.clear_widgets()
+
+        if not self.check_camera_permission():
+            self.content.add_widget(Label(text="Keine Berechtigung verfügbar", font_size=24))
+            return
 
         self.camera = Camera(play=True, resolution=(1280, 720))
         self.camera.size_hint = (1, 0.95)
@@ -61,7 +87,7 @@ class CameraApp(App):
         capture_btn = Button(size_hint=(None,None), size=(90,90),
                              pos_hint={"center_x":0.5, "y":0.02},
                              background_normal="", background_color=(1,1,1,1))
-        capture_btn.bind(on_press=self.take_photo)
+        capture_btn.bind(on_press=self.capture_dialog)
         self.content.add_widget(capture_btn)
 
         # Roter Punkt bei Arduino aktiv
@@ -74,25 +100,38 @@ class CameraApp(App):
         if hasattr(self, "rotation"):
             self.rotation.origin = self.camera.center
 
-    def take_photo(self, *args):
-        try:
-            number = self.get_next_number()
-            filename = f"{number:04}.png"
-            path = os.path.join(self.photos_dir, filename)
-            self.camera.export_to_png(path)
+    # Popup nach Klick auf runden Button → Speichern/Wiederholen
+    def capture_dialog(self, *args):
+        layout = BoxLayout(orientation="vertical", spacing=20, padding=20)
+        layout.add_widget(Label(text="Foto aufnehmen?"))
 
-            self.store.put(str(number),
-                           name=f"{number:04}",
-                           date=str(datetime.now()),
-                           arduino=self.store.get("arduino")["value"] if self.store.exists("arduino") else "Nein")
+        btn_layout = BoxLayout(spacing=20)
+        save_btn = Button(text="Speichern")
+        retry_btn = Button(text="Wiederholen")
+        btn_layout.add_widget(save_btn)
+        btn_layout.add_widget(retry_btn)
+        layout.add_widget(btn_layout)
 
-            self.show_camera()
-        except Exception as e:
-            print("Fehler beim Speichern:", e)
+        popup = Popup(title="Foto", content=layout, size_hint=(0.7,0.5))
+        popup.open()
+
+        save_btn.bind(on_press=lambda x: (self.take_photo(), popup.dismiss()))
+        retry_btn.bind(on_press=lambda x: popup.dismiss())
+
+    def take_photo(self):
+        number = self.get_next_number()
+        filename = f"{number:04}.png"
+        path = os.path.join(self.photos_dir, filename)
+        self.camera.export_to_png(path)
+
+        self.store.put(str(number),
+                       name=f"{number:04}",
+                       date=str(datetime.now()),
+                       arduino=self.store.get("arduino")["value"] if self.store.exists("arduino") else "Nein")
 
     def get_next_number(self):
         files = [f for f in os.listdir(self.photos_dir) if f.endswith(".png")]
-        numbers = [int(f.replace(".png", "")) for f in files if f.replace(".png", "").isdigit()]
+        numbers = [int(f.replace(".png","")) for f in files if f.replace(".png","").isdigit()]
         return max(numbers)+1 if numbers else 1
 
     # ========================= GALLERY =========================
@@ -102,15 +141,18 @@ class CameraApp(App):
         grid = GridLayout(cols=2, spacing=20, padding=20, size_hint_y=None)
         grid.bind(minimum_height=grid.setter('height'))
 
-        files = sorted(
-            [f for f in os.listdir(self.photos_dir) if f.endswith(".png")],
-            key=lambda x: os.path.getmtime(os.path.join(self.photos_dir, x)),
-            reverse=True
-        )
+        files = sorted([f for f in os.listdir(self.photos_dir) if f.endswith(".png")],
+                       key=lambda x: os.path.getmtime(os.path.join(self.photos_dir, x)), reverse=True)
+
+        if not files:
+            self.content.add_widget(Label(text="Noch keine Fotos verfügbar", font_size=24))
+            return
 
         for file in files:
             path = os.path.join(self.photos_dir, file)
-            btn = Button(size_hint_y=None, height=350, background_normal=path)
+            btn = Button(size_hint_y=None, height=350, background_normal="")
+            img = AsyncImage(source=path, allow_stretch=True, keep_ratio=True)
+            btn.add_widget(img)
             btn.bind(on_press=lambda x, p=path, f=file: self.show_image_popup(p, f))
             grid.add_widget(btn)
 
@@ -119,18 +161,16 @@ class CameraApp(App):
 
     def show_image_popup(self, path, filename):
         layout = BoxLayout(orientation="vertical", padding=20, spacing=20)
-        layout.add_widget(AsyncImage(source=path, size_hint_y=0.7))
-        layout.add_widget(Label(text=f"Name: {filename}"))
+        layout.add_widget(AsyncImage(source=path, allow_stretch=True, keep_ratio=True, size_hint_y=0.7))
+        layout.add_widget(Label(text=f"Nummer: {filename.replace('.png','')}"))
 
         btn_layout = BoxLayout(size_hint_y=0.2, spacing=10)
-
         info_btn = Button(text="i")
         info_btn.bind(on_press=lambda x: self.show_info_popup(path, filename))
         btn_layout.add_widget(info_btn)
-
         layout.add_widget(btn_layout)
 
-        popup = Popup(title="Bild", content=layout, size_hint=(0.9, 0.9))
+        popup = Popup(title="Bild", content=layout, size_hint=(0.9,0.9))
         popup.open()
 
     def show_info_popup(self, path, filename):
@@ -166,23 +206,20 @@ class CameraApp(App):
         popup = Popup(title="Info", content=layout, size_hint=(0.8,0.8))
         popup.open()
 
-    # ========================= HELP =========================
-    def show_help(self, *args):
-        self.content.clear_widgets()
-        self.content.add_widget(Label(text="Hilfe"))
-
     # ========================= SETTINGS =========================
     def show_extra(self, *args):
         self.content.clear_widgets()
-
         layout = GridLayout(cols=3, padding=40, spacing=20)
+        layout.add_widget(Label(text="Einstellungen", font_size=24))
 
+        # Arduino
         layout.add_widget(Label(text="Daten von Arduino"))
         ja1 = Button(text="Ja", size_hint=(None,None), size=(100,50))
         nein1 = Button(text="Nein", size_hint=(None,None), size=(100,50))
         layout.add_widget(ja1)
         layout.add_widget(nein1)
 
+        # Winkel
         layout.add_widget(Label(text="Mit Winkel"))
         ja2 = Button(text="Ja", size_hint=(None,None), size=(100,50))
         nein2 = Button(text="Nein", size_hint=(None,None), size=(100,50))
@@ -192,12 +229,12 @@ class CameraApp(App):
         # Lade gespeicherte Werte
         if self.store.exists("arduino"):
             val = self.store.get("arduino")["value"]
-            if val=="Ja": ja1.background_color = (0,0.5,0,1)
-            else: nein1.background_color = (0,0.5,0,1)
+            ja1.background_color = (0,0.5,0,1) if val=="Ja" else (1,1,1,1)
+            nein1.background_color = (0,0.5,0,1) if val=="Nein" else (1,1,1,1)
         if self.store.exists("winkel"):
             val = self.store.get("winkel")["value"]
-            if val=="Ja": ja2.background_color = (0,0.5,0,1)
-            else: nein2.background_color = (0,0.5,0,1)
+            ja2.background_color = (0,0.5,0,1) if val=="Ja" else (1,1,1,1)
+            nein2.background_color = (0,0.5,0,1) if val=="Nein" else (1,1,1,1)
 
         def set_arduino(btn_val):
             self.store.put("arduino", value=btn_val)
