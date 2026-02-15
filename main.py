@@ -49,15 +49,8 @@ class Dashboard(BoxLayout):
         self.create_capture_button()
         Window.bind(on_resize=self.update_orientation)
 
-        # Kamera beim Start anzeigen, wenn verfügbar, sonst Hilfe
-        try:
-            # Versuch Kamera zu öffnen
-            self.camera_test = Camera(play=True)
-            self.camera_test.play = False
-            self.camera_test = None
-            self.show_camera()
-        except Exception:
-            self.show_help()  # Hilfe-Seite, wenn Kamera nicht geht
+        # === START MIT HILFE-SEITE ===
+        self.show_help()
 
     # ================= CAMERA BUTTON =================
     def create_capture_button(self):
@@ -88,7 +81,7 @@ class Dashboard(BoxLayout):
         self.camera.size_hint = (1, 0.9)
         self.camera.pos_hint = {"top": 1}
 
-        # Drehung wie im alten Code
+        # Kamera drehen
         with self.camera.canvas.before:
             PushMatrix()
             self.rotation = Rotate(angle=-90, origin=self.camera.center)
@@ -232,7 +225,7 @@ class Dashboard(BoxLayout):
         layout.add_widget(Label(text="Mit Winkel"))
         ja2 = Button(text="Ja")
         nein2 = Button(text="Nein")
-        ja2.bind(on_press=lambda x: self.toggle(ja2, nein2))
+        ja2.bind(on_press=lambda x: self.toggle(ja2, ja2))
         nein2.bind(on_press=lambda x: self.toggle(nein2, ja2))
         layout.add_widget(ja2)
         layout.add_widget(nein2)
