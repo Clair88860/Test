@@ -83,23 +83,49 @@ class Dashboard(BoxLayout):
         self.circle.pos = self.capture_button.pos
         self.circle.size = self.capture_button.size
 
-    # ================= CAMERA =================
+   
     def show_camera(self, *args):
+
         self.content.clear_widgets()
-        self.bottom.opacity = 1
+
+        # -------------------------------
+        # >>>>> HIER IST DIE KAMERA <<<<<
+        # -------------------------------
 
         self.camera = Camera(play=True, resolution=(1280, 720))
-        self.camera.size_hint = (1, 1)
+        self.camera.size_hint = (1, 0.9)
+        self.camera.pos_hint = {"top": 1}
         self.content.add_widget(self.camera)
 
         self.update_orientation()
+        # =========================================================
+        # 🔥🔥🔥 HIER WIRD DIE KAMERA 90° NACH RECHTS GEDREHT 🔥🔥🔥
+        # =========================================================
+        with self.camera.canvas.before:
+            PushMatrix()
+            self.rotation = Rotate(
+                angle=-90,   # ← HIER WIRD GEDREHT (90° NACH RECHTS)
+                origin=self.camera.center
+            )
 
-    def update_orientation(self, *args):
-        if hasattr(self, "camera"):
-            if Window.height > Window.width:
-                self.camera.rotation = -90
-            else:
-                self.camera.rotation = 0
+        with self.camera.canvas.after:
+            PopMatrix()
+
+        # Rotation dynamisch aktualisieren
+        self.camera.bind(pos=self.update_rotation_origin,
+                         size=self.update_rotation_origin)
+
+        # =========================================================
+
+        self.content.add_widget(self.camera)
+
+        # Runder weißer Kamera Button
+        capture_btn = Button(
+            size_hint=(None, None),
+            size=(90, 90),
+    def show_camera(self, *args):
+        capture_btn.bind(on_press=self.take_photo)
+        self.content.add_widget(capture_btn)
 
     # ================= FOTO =================
     def take_photo(self, instance):
