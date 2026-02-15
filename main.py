@@ -58,7 +58,7 @@ class Dashboard(BoxLayout):
 
         self.show_camera()
 
-    # ================= CAMERA BUTTON =================
+    # ================= CAMERA BUTTON rund=================
     def create_capture_button(self):
         self.capture_button = Button(
             size_hint=(None, None),
