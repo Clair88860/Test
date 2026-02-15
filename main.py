@@ -14,14 +14,6 @@ from kivy.uix.textinput import TextInput
 from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.graphics import Color, Ellipse, PushMatrix, PopMatrix, Rotate
-from kivy.storage.jsonstore import JsonStore
-
-# Android Permissions
-try:
-    from android.permissions import request_permissions, Permission
-except ImportError:
-    request_permissions = None
-    Permission = None
 
 Window.clearcolor = (0.1, 0.1, 0.12, 1)
 
@@ -29,9 +21,6 @@ Window.clearcolor = (0.1, 0.1, 0.12, 1)
 class Dashboard(BoxLayout):
     def __init__(self, **kwargs):
         super().__init__(orientation="vertical", **kwargs)
-
-        # Speicher für App-Status (Berechtigungen, Einstellungen, etc.)
-        self.store = JsonStore("app_state.json")
 
         self.photos_dir = os.path.join(App.get_running_app().user_data_dir, "photos")
         os.makedirs(self.photos_dir, exist_ok=True)
@@ -58,11 +47,17 @@ class Dashboard(BoxLayout):
         self.add_widget(self.bottom)
 
         self.create_capture_button()
-
         Window.bind(on_resize=self.update_orientation)
 
-        # Prüfen: Kamera-Berechtigung
-        self.check_camera_permission_startup()
+        # Kamera beim Start anzeigen, wenn verfügbar, sonst Hilfe
+        try:
+            # Versuch Kamera zu öffnen
+            self.camera_test = Camera(play=True)
+            self.camera_test.play = False
+            self.camera_test = None
+            self.show_camera()
+        except Exception:
+            self.show_help()  # Hilfe-Seite, wenn Kamera nicht geht
 
     # ================= CAMERA BUTTON =================
     def create_capture_button(self):
@@ -83,50 +78,6 @@ class Dashboard(BoxLayout):
     def update_circle(self, *args):
         self.circle.pos = self.capture_button.pos
         self.circle.size = self.capture_button.size
-
-    # ================= CHECK CAMERA PERMISSION =================
-    def check_camera_permission_startup(self):
-        # Wenn Kamera-Berechtigung schon da, Kamera direkt öffnen
-        if self.has_camera_permission():
-            self.show_camera()
-        else:
-            # Andernfalls Hilfe-Seite
-            self.show_help_permission()
-
-    def has_camera_permission(self):
-        if request_permissions:
-            # Android: prüfen, ob Permission bereits da
-            from android.permissions import check_permission
-            return check_permission(Permission.CAMERA)
-        return True  # Auf Desktop etc. einfach True
-
-    # ================= HELP / PERMISSION =================
-    def show_help_permission(self):
-        self.content.clear_widgets()
-        self.bottom.opacity = 0
-
-        layout = BoxLayout(orientation="vertical", padding=50, spacing=40)
-        label = Label(text="Berechtigungen", font_size=40, size_hint=(1, 0.3))
-        layout.add_widget(label)
-
-        cam_btn = Button(text="Kamera", size_hint=(0.5, 0.2), pos_hint={"center_x": 0.5})
-        cam_btn.bind(on_press=self.request_camera_permission)
-        layout.add_widget(cam_btn)
-
-        self.content.add_widget(layout)
-
-    def request_camera_permission(self, instance):
-        if request_permissions:
-            request_permissions([Permission.CAMERA], self.after_permission)
-        else:
-            # Desktop fallback
-            self.show_camera()
-
-    def after_permission(self, permissions, results):
-        if all(results):
-            self.show_camera()
-        else:
-            self.show_help_permission()
 
     # ================= CAMERA =================
     def show_camera(self, *args):
@@ -160,7 +111,6 @@ class Dashboard(BoxLayout):
     def show_preview(self, path):
         self.content.clear_widgets()
         self.bottom.opacity = 0
-
         layout = FloatLayout()
         self.content.add_widget(layout)
 
@@ -186,13 +136,11 @@ class Dashboard(BoxLayout):
     def show_gallery(self, *args):
         self.content.clear_widgets()
         self.bottom.opacity = 0
-
         scroll = ScrollView()
         grid = GridLayout(cols=2, spacing=10, size_hint_y=None)
         grid.bind(minimum_height=grid.setter('height'))
 
         files = sorted([f for f in os.listdir(self.photos_dir) if f.endswith(".png")])
-
         for file in files:
             img_path = os.path.join(self.photos_dir, file)
             btn = Button(background_normal=img_path, background_down=img_path, size_hint_y=None, height=250)
@@ -296,7 +244,10 @@ class Dashboard(BoxLayout):
 
     # ================= HELP =================
     def show_help(self, *args):
-        self.show_help_permission()
+        self.content.clear_widgets()
+        self.bottom.opacity = 0
+        # Leere Hilfe-Seite
+        self.content.add_widget(Label())
 
 
 class MainApp(App):
