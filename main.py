@@ -14,25 +14,24 @@ from kivy.uix.textinput import TextInput
 from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.graphics import Color, Ellipse, PushMatrix, PopMatrix, Rotate
+from kivy.storage.jsonstore import JsonStore
 
 Window.clearcolor = (0.1, 0.1, 0.12, 1)
 
 
 class Dashboard(BoxLayout):
+
     def __init__(self, **kwargs):
         super().__init__(orientation="vertical", **kwargs)
 
         self.photos_dir = os.path.join(App.get_running_app().user_data_dir, "photos")
         os.makedirs(self.photos_dir, exist_ok=True)
 
+        self.store = JsonStore(os.path.join(App.get_running_app().user_data_dir, "settings.json"))
+
         # ---------- TOP BAR ----------
         topbar = BoxLayout(size_hint=(1, 0.1))
-        for text, func in [
-            ("?", self.show_help),
-            ("K", self.show_camera),
-            ("G", self.show_gallery),
-            ("E", self.show_extra)
-        ]:
+        for text, func in [("?", self.show_help), ("K", self.show_camera), ("G", self.show_gallery), ("E", self.show_extra)]:
             btn = Button(text=text)
             btn.bind(on_press=func)
             topbar.add_widget(btn)
@@ -46,50 +45,59 @@ class Dashboard(BoxLayout):
         self.bottom = FloatLayout(size_hint=(1, 0.18))
         self.add_widget(self.bottom)
 
-        self.create_capture_button()
-        Window.bind(on_resize=self.update_orientation)
+        self.capture_button = None
+        self.camera = None
+        self.rotation = None
 
-        # === START MIT HILFE-SEITE ===
+        # Zeige zuerst die Hilfe-Seite
         self.show_help()
 
     # ================= CAMERA BUTTON =================
     def create_capture_button(self):
+        if self.capture_button:
+            self.bottom.remove_widget(self.capture_button)
+
         self.capture_button = Button(
             size_hint=(None, None),
             size=(dp(90), dp(90)),
             background_normal="",
             background_color=(0, 0, 0, 0),
-            pos_hint={"center_x": 0.5, "center_y": 0.5}
+            pos_hint={"center_x": 0.5, "center_y": 0.05}
         )
+
         with self.capture_button.canvas.before:
             Color(1, 1, 1, 1)
             self.circle = Ellipse(size=self.capture_button.size, pos=self.capture_button.pos)
+
         self.capture_button.bind(pos=self.update_circle, size=self.update_circle)
         self.capture_button.bind(on_press=self.take_photo)
         self.bottom.add_widget(self.capture_button)
 
     def update_circle(self, *args):
-        self.circle.pos = self.capture_button.pos
-        self.circle.size = self.capture_button.size
+        if hasattr(self, "circle"):
+            self.circle.pos = self.capture_button.pos
+            self.circle.size = self.capture_button.size
 
     # ================= CAMERA =================
     def show_camera(self, *args):
         self.content.clear_widgets()
         self.bottom.opacity = 1
 
-        self.camera = Camera(play=True, resolution=(1280, 720))
-        self.camera.size_hint = (1, 0.9)
-        self.camera.pos_hint = {"top": 1}
+        if not self.camera:
+            self.camera = Camera(play=True, resolution=(1280, 720))
+            self.camera.size_hint = (1, 0.9)
+            self.camera.pos_hint = {"top": 1}
 
-        # Kamera drehen
-        with self.camera.canvas.before:
-            PushMatrix()
-            self.rotation = Rotate(angle=-90, origin=self.camera.center)
-        with self.camera.canvas.after:
-            PopMatrix()
-        self.camera.bind(pos=self.update_rotation_origin, size=self.update_rotation_origin)
+            # Kamera 90° nach rechts drehen
+            with self.camera.canvas.before:
+                PushMatrix()
+                self.rotation = Rotate(angle=-90, origin=self.camera.center)
+            with self.camera.canvas.after:
+                PopMatrix()
+            self.camera.bind(pos=self.update_rotation_origin, size=self.update_rotation_origin)
 
         self.content.add_widget(self.camera)
+        self.create_capture_button()
 
     def update_rotation_origin(self, *args):
         if hasattr(self, "rotation"):
@@ -104,16 +112,19 @@ class Dashboard(BoxLayout):
     def show_preview(self, path):
         self.content.clear_widgets()
         self.bottom.opacity = 0
+
         layout = FloatLayout()
         self.content.add_widget(layout)
 
         img = Image(source=path, allow_stretch=True)
         layout.add_widget(img)
 
+        # Wiederholen
         btn_retry = Button(text="Wiederholen", size_hint=(0.3, 0.12), pos_hint={"x": 0.1, "y": 0.05})
         btn_retry.bind(on_press=lambda x: self.show_camera())
         layout.add_widget(btn_retry)
 
+        # Speichern
         btn_save = Button(text="Speichern", size_hint=(0.3, 0.12), pos_hint={"x": 0.6, "y": 0.05})
         btn_save.bind(on_press=lambda x: self.save_auto(path))
         layout.add_widget(btn_save)
@@ -129,11 +140,13 @@ class Dashboard(BoxLayout):
     def show_gallery(self, *args):
         self.content.clear_widgets()
         self.bottom.opacity = 0
+
         scroll = ScrollView()
         grid = GridLayout(cols=2, spacing=10, size_hint_y=None)
         grid.bind(minimum_height=grid.setter('height'))
 
         files = sorted([f for f in os.listdir(self.photos_dir) if f.endswith(".png")])
+
         for file in files:
             img_path = os.path.join(self.photos_dir, file)
             btn = Button(background_normal=img_path, background_down=img_path, size_hint_y=None, height=250)
@@ -172,8 +185,8 @@ class Dashboard(BoxLayout):
         layout.add_widget(Label(text=date_str))
         delete_btn = Button(text="Foto löschen")
         layout.add_widget(delete_btn)
-
         popup = Popup(title="Info", content=layout, size_hint=(0.8, 0.6))
+
         delete_btn.bind(on_press=lambda x: self.confirm_delete(filename, popup))
         name_input.bind(on_text_validate=lambda x: self.rename_file(filename, name_input.text, popup))
         popup.open()
@@ -214,6 +227,7 @@ class Dashboard(BoxLayout):
         self.content.clear_widgets()
         self.bottom.opacity = 0
         layout = GridLayout(cols=3, spacing=10, padding=20)
+
         layout.add_widget(Label(text="Daten von Arduino"))
         ja1 = Button(text="Ja")
         nein1 = Button(text="Nein")
@@ -225,10 +239,11 @@ class Dashboard(BoxLayout):
         layout.add_widget(Label(text="Mit Winkel"))
         ja2 = Button(text="Ja")
         nein2 = Button(text="Nein")
-        ja2.bind(on_press=lambda x: self.toggle(ja2, ja2))
+        ja2.bind(on_press=lambda x: self.toggle(ja2, nein2))
         nein2.bind(on_press=lambda x: self.toggle(nein2, ja2))
         layout.add_widget(ja2)
         layout.add_widget(nein2)
+
         self.content.add_widget(layout)
 
     def toggle(self, active, inactive):
@@ -239,8 +254,7 @@ class Dashboard(BoxLayout):
     def show_help(self, *args):
         self.content.clear_widgets()
         self.bottom.opacity = 0
-        # Leere Hilfe-Seite
-        self.content.add_widget(Label())
+        self.content.add_widget(Label(text="Hilfe", font_size=40, pos_hint={"center_x": 0.5, "center_y": 0.5}))
 
 
 class MainApp(App):
