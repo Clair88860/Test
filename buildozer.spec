@@ -20,7 +20,7 @@ version = 1.0
 entrypoint = main.py
 
 # Benötigte Bibliotheken
-orientation = landscape
+orientation = portrait
 requirements = python3,kivy,pyjnius,android
 android.permissions = CAMERA
 
