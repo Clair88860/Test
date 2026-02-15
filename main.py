@@ -1,5 +1,7 @@
 import os
 import datetime
+from PIL import Image as PILImage, ImageDraw, ImageFont
+
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
@@ -14,7 +16,7 @@ from kivy.uix.textinput import TextInput
 from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.storage.jsonstore import JsonStore
-from kivy.graphics import PushMatrix, PopMatrix, Rotate, Color, Ellipse, Rectangle
+from kivy.graphics import Color, Ellipse
 
 try:
     from android.permissions import check_permission, Permission
@@ -31,12 +33,15 @@ class Dashboard(BoxLayout):
         super().__init__(orientation="vertical", **kwargs)
 
         self.store = JsonStore("settings.json")
-        self.photos_dir = os.path.join(
-            App.get_running_app().user_data_dir, "photos")
+
+        base_dir = App.get_running_app().user_data_dir
+        self.photos_dir = os.path.join(base_dir, "photos")
+        self.thumb_dir = os.path.join(self.photos_dir, "thumbs")
+
         os.makedirs(self.photos_dir, exist_ok=True)
+        os.makedirs(self.thumb_dir, exist_ok=True)
 
         self.camera = None
-        self.rotation = None
 
         # Top Bar
         topbar = BoxLayout(size_hint=(1, 0.1))
@@ -52,11 +57,9 @@ class Dashboard(BoxLayout):
 
         self.add_widget(topbar)
 
-        # Content
         self.content = FloatLayout()
         self.add_widget(self.content)
 
-        # Bottom
         self.bottom = FloatLayout(size_hint=(1, 0.15))
         self.add_widget(self.bottom)
 
@@ -66,7 +69,7 @@ class Dashboard(BoxLayout):
             self.show_help()
 
     # =====================================================
-    # ================= CAMERA 16:9 =======================
+    # ================= CAMERA ============================
     # =====================================================
 
     def show_camera(self, *args):
@@ -83,26 +86,10 @@ class Dashboard(BoxLayout):
             ))
             return
 
-        # 16:9 Kamera
-        self.camera = Camera(
-            play=True,
-            resolution=(1280, 720)
-        )
+        self.camera = Camera(play=True, resolution=(1280, 720))
         self.camera.size_hint = (1, 1)
         self.content.add_widget(self.camera)
 
-        # Drehung
-        with self.camera.canvas.before:
-            PushMatrix()
-            self.rotation = Rotate(angle=-90,
-                                   origin=self.camera.center)
-        with self.camera.canvas.after:
-            PopMatrix()
-
-        self.camera.bind(pos=self.update_rotation,
-                         size=self.update_rotation)
-
-        # Runder Button kleiner & höher
         btn = Button(size_hint=(None, None),
                      size=(dp(55), dp(55)),
                      pos_hint={"center_x": 0.5, "y": 0.18},
@@ -111,8 +98,7 @@ class Dashboard(BoxLayout):
 
         with btn.canvas.before:
             Color(1, 1, 1, 1)
-            self.circle = Ellipse(size=btn.size,
-                                  pos=btn.pos)
+            self.circle = Ellipse(size=btn.size, pos=btn.pos)
 
         btn.bind(pos=self.update_circle,
                  size=self.update_circle)
@@ -120,76 +106,62 @@ class Dashboard(BoxLayout):
 
         self.bottom.add_widget(btn)
 
-    def update_rotation(self, *args):
-        if self.rotation:
-            self.rotation.origin = self.camera.center
-
     def update_circle(self, instance, *args):
         self.circle.pos = instance.pos
         self.circle.size = instance.size
 
-    # =====================================================
-    # ================= FOTO ==============================
-    # =====================================================
-
     def take_photo(self, instance):
         temp_path = os.path.join(self.photos_dir, "temp.png")
         self.camera.export_to_png(temp_path)
-        self.show_preview(temp_path)
+        self.save_photo(temp_path)
 
-    def show_preview(self, path):
-        self.content.clear_widgets()
-        self.bottom.opacity = 0
-
-        layout = FloatLayout()
-        self.content.add_widget(layout)
-
-        img = Image(source=path,
-                    allow_stretch=True,
-                    keep_ratio=True)
-        layout.add_widget(img)
-
-        # Norden Overlay
-        if self.store.exists("arduino") and self.store.get("arduino")["value"]:
-            label = Label(text="Norden",
-                          size_hint=(None, None),
-                          size=(140, 45),
-                          pos_hint={"right": 0.98, "top": 0.98},
-                          color=(1, 1, 1, 1),
-                          bold=True)
-
-            with label.canvas.before:
-                Color(0, 0, 0, 0.8)
-                self.rect = Rectangle(size=label.size,
-                                      pos=label.pos)
-
-            label.bind(pos=self.update_rect,
-                       size=self.update_rect)
-            layout.add_widget(label)
-
-        btn_retry = Button(text="Wiederholen",
-                           size_hint=(0.3, 0.1),
-                           pos_hint={"x": 0.1, "y": 0.05})
-        btn_retry.bind(on_press=lambda x: self.show_camera())
-        layout.add_widget(btn_retry)
-
-        btn_save = Button(text="Speichern",
-                          size_hint=(0.3, 0.1),
-                          pos_hint={"x": 0.6, "y": 0.05})
-        btn_save.bind(on_press=lambda x: self.save_photo(path))
-        layout.add_widget(btn_save)
-
-    def update_rect(self, instance, *args):
-        self.rect.pos = instance.pos
-        self.rect.size = instance.size
+    # =====================================================
+    # ================= SPEICHERN =========================
+    # =====================================================
 
     def save_photo(self, temp_path):
+
         files = [f for f in os.listdir(self.photos_dir)
                  if f.endswith(".png") and f != "temp.png"]
 
         filename = f"{len(files)+1:04d}.png"
-        os.rename(temp_path,
-                  os.path.join(self.photos_dir, filename))
+        final_path = os.path.join(self.photos_dir, filename)
+        os.rename(temp_path, final_path)
+
+        # Norden ins Original einzeichnen
+        if self.store.exists("arduino") and self.store.get("arduino")["value"]:
+            img = PILImage.open(final_path)
+            draw = ImageDraw.Draw(img)
+
+            font_size = int(img.width / 18)
+            try:
+                font = ImageFont.truetype("arial.ttf", font_size)
+            except:
+                font = None
+
+            text = "Norden"
+            text_width = font_size * 4
+            text_height = font_size + 10
+
+            x = img.width - text_width - 20
+            y = 20
+
+            draw.rectangle(
+                [x - 10, y - 5, x + text_width, y + text_height],
+                fill=(0, 0, 0, 200)
+            )
+            draw.text((x, y),
+                      text,
+                      fill=(255, 255, 255),
+                      font=font)
+
+            img.save(final_path)
+
+        # Thumbnail erstellen
+        thumb_path = os.path.join(self.thumb_dir, filename)
+        img = PILImage.open(final_path)
+        img.thumbnail((400, 400))
+        img.save(thumb_path)
 
         self.show_camera()
 
@@ -212,23 +184,129 @@ class Dashboard(BoxLayout):
                         if f.endswith(".png")])
 
         for file in files:
-            img_path = os.path.join(self.photos_dir, file)
+            thumb_path = os.path.join(self.thumb_dir, file)
 
-            btn = Button(size_hint_y=None,
-                         height=120,
-                         background_normal=img_path,
-                         background_down=img_path)
+            container = FloatLayout(size_hint_y=None,
+                                    height=120)
+
+            btn = Button(background_normal=thumb_path,
+                         background_down=thumb_path,
+                         size_hint=(1, 1))
 
             btn.bind(on_press=lambda x, f=file:
                      self.open_image_view(f))
 
-            grid.add_widget(btn)
+            container.add_widget(btn)
+
+            # Zahl unten links
+            label = Label(text=file.replace(".png", ""),
+                          size_hint=(None, None),
+                          size=(80, 30),
+                          pos_hint={"x": 0.02, "y": 0.02})
+            container.add_widget(label)
+
+            # Info Button unten rechts
+            info_btn = Button(text="i",
+                              size_hint=(None, None),
+                              size=(30, 30),
+                              pos_hint={"right": 0.98, "y": 0.02})
+
+            info_btn.bind(on_press=lambda x, f=file:
+                          self.show_info_popup(f))
+
+            container.add_widget(info_btn)
+
+            grid.add_widget(container)
 
         scroll.add_widget(grid)
         self.content.add_widget(scroll)
 
     # =====================================================
-    # ================= SETTINGS ==========================
+    # ================= FOTO ANSICHT ======================
+    # =====================================================
+
+    def open_image_view(self, filename):
+        self.content.clear_widgets()
+
+        layout = FloatLayout()
+        self.content.add_widget(layout)
+
+        path = os.path.join(self.photos_dir, filename)
+
+        img = Image(source=path,
+                    allow_stretch=True,
+                    keep_ratio=True)
+        layout.add_widget(img)
+
+    # =====================================================
+    # ================= INFO POPUP ========================
+    # =====================================================
+
+    def show_info_popup(self, filename):
+        path = os.path.join(self.photos_dir, filename)
+
+        timestamp = os.path.getmtime(path)
+        date_str = datetime.datetime.fromtimestamp(
+            timestamp).strftime("%d.%m.%Y %H:%M")
+
+        layout = BoxLayout(orientation="vertical",
+                           spacing=10,
+                           padding=10)
+
+        name_input = TextInput(
+            text=filename.replace(".png", ""),
+            multiline=False)
+
+        layout.add_widget(name_input)
+        layout.add_widget(Label(text=date_str))
+
+        delete_btn = Button(text="Foto löschen")
+        layout.add_widget(delete_btn)
+
+        popup = Popup(title="Info",
+                      content=layout,
+                      size_hint=(0.8, 0.6))
+
+        delete_btn.bind(
+            on_press=lambda x:
+            self.delete_photo(filename, popup)
+        )
+
+        name_input.bind(
+            on_text_validate=lambda x:
+            self.rename_photo(filename,
+                              name_input.text,
+                              popup)
+        )
+
+        popup.open()
+
+    def rename_photo(self, old_name, new_name, popup):
+        old_path = os.path.join(self.photos_dir, old_name)
+        new_name_full = new_name + ".png"
+        new_path = os.path.join(self.photos_dir, new_name_full)
+
+        os.rename(old_path, new_path)
+
+        # Thumbnail auch umbenennen
+        old_thumb = os.path.join(self.thumb_dir, old_name)
+        new_thumb = os.path.join(self.thumb_dir, new_name_full)
+        if os.path.exists(old_thumb):
+            os.rename(old_thumb, new_thumb)
+
+        popup.dismiss()
+        self.show_gallery()
+
+    def delete_photo(self, filename, popup):
+        os.remove(os.path.join(self.photos_dir, filename))
+
+        thumb = os.path.join(self.thumb_dir, filename)
+        if os.path.exists(thumb):
+            os.remove(thumb)
+
+        popup.dismiss()
+        self.show_gallery()
+
     # =====================================================
 
     def show_extra(self, *args):
@@ -236,7 +314,8 @@ class Dashboard(BoxLayout):
         self.bottom.opacity = 0
 
         layout = BoxLayout(orientation="vertical",
-                           spacing=20, padding=30)
+                           spacing=20,
+                           padding=30)
 
         row = BoxLayout(spacing=20)
         row.add_widget(Label(text="Daten von Arduino"))
@@ -258,8 +337,6 @@ class Dashboard(BoxLayout):
         layout.add_widget(row)
 
         self.content.add_widget(layout)
-
-    # =====================================================
 
     def show_help(self, *args):
         self.content.clear_widgets()
