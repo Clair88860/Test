@@ -1,21 +1,20 @@
 import os
-import shutil
-from datetime import datetime
+import datetime
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.gridlayout import GridLayout
+from kivy.uix.scrollview import ScrollView
 from kivy.uix.camera import Camera
 from kivy.uix.image import Image
 from kivy.uix.button import Button
 from kivy.uix.label import Label
-from kivy.uix.scrollview import ScrollView
-from kivy.uix.gridlayout import GridLayout
 from kivy.uix.popup import Popup
 from kivy.uix.textinput import TextInput
-from kivy.storage.jsonstore import JsonStore
-from kivy.graphics import Color, Ellipse
-from kivy.metrics import dp
 from kivy.core.window import Window
+from kivy.metrics import dp
+from kivy.graphics import Color, Ellipse
+from kivy.storage.jsonstore import JsonStore
 
 Window.clearcolor = (0.1, 0.1, 0.12, 1)
 
@@ -26,46 +25,54 @@ class Dashboard(BoxLayout):
         super().__init__(orientation="vertical", **kwargs)
 
         self.store = JsonStore("settings.json")
+
         self.photos_dir = os.path.join(
-            App.get_running_app().user_data_dir, "photos"
+            App.get_running_app().user_data_dir,
+            "photos"
         )
         os.makedirs(self.photos_dir, exist_ok=True)
 
-        # ---------------- TOP BAR ----------------
-        top = BoxLayout(size_hint=(1, 0.1))
+        # ---------- TOP BAR ----------
+        topbar = BoxLayout(size_hint=(1, 0.1))
+
         for text, func in [
             ("?", self.show_help),
             ("K", self.show_camera),
             ("G", self.show_gallery),
-            ("E", self.show_settings)
+            ("E", self.show_extra)
         ]:
-            b = Button(text=text)
-            b.bind(on_press=func)
-            top.add_widget(b)
-        self.add_widget(top)
+            btn = Button(text=text)
+            btn.bind(on_press=func)
+            topbar.add_widget(btn)
 
-        # ---------------- CONTENT ----------------
+        self.add_widget(topbar)
+
+        # ---------- CONTENT ----------
         self.content = FloatLayout()
         self.add_widget(self.content)
 
-        # ---------------- BOTTOM ----------------
+        # ---------- BOTTOM ----------
         self.bottom = FloatLayout(size_hint=(1, 0.18))
         self.add_widget(self.bottom)
 
         self.create_capture_button()
 
-        # START
-        self.start_screen()
-
-    # =====================================================
-    # START LOGIK
-    # =====================================================
-    def start_screen(self):
+        # Startprüfung
         if self.camera_available():
             self.show_camera()
         else:
             self.show_help()
 
+    # ================= SETTINGS =================
+    def get_setting(self, key):
+        if self.store.exists(key):
+            return self.store.get(key)["value"]
+        return "Nein"
+
+    def set_setting(self, key, value):
+        self.store.put(key, value=value)
+
+    # ================= CAMERA VERFÜGBAR =================
     def camera_available(self):
         try:
             cam = Camera()
@@ -74,11 +81,9 @@ class Dashboard(BoxLayout):
         except:
             return False
 
-    # =====================================================
-    # RUNDER BUTTON
-    # =====================================================
+    # ================= CAMERA BUTTON =================
     def create_capture_button(self):
-        self.capture_btn = Button(
+        self.capture_button = Button(
             size_hint=(None, None),
             size=(dp(90), dp(90)),
             background_normal="",
@@ -86,53 +91,54 @@ class Dashboard(BoxLayout):
             pos_hint={"center_x": 0.5, "center_y": 0.5}
         )
 
-        with self.capture_btn.canvas.before:
+        with self.capture_button.canvas.before:
             Color(1, 1, 1, 1)
-            self.circle = Ellipse(
-                size=self.capture_btn.size,
-                pos=self.capture_btn.pos
-            )
+            self.circle = Ellipse(size=self.capture_button.size,
+                                  pos=self.capture_button.pos)
 
-        self.capture_btn.bind(pos=self.update_circle,
-                              size=self.update_circle)
-        self.capture_btn.bind(on_press=self.take_photo)
-        self.bottom.add_widget(self.capture_btn)
+        self.capture_button.bind(pos=self.update_circle,
+                                 size=self.update_circle)
+        self.capture_button.bind(on_press=self.take_photo)
+        self.bottom.add_widget(self.capture_button)
 
     def update_circle(self, *args):
-        self.circle.pos = self.capture_btn.pos
-        self.circle.size = self.capture_btn.size
+        self.circle.pos = self.capture_button.pos
+        self.circle.size = self.capture_button.size
 
-    # =====================================================
-    # CAMERA
-    # =====================================================
+    # ================= CAMERA =================
     def show_camera(self, *args):
         self.content.clear_widgets()
-        self.bottom.opacity = 1
 
         if not self.camera_available():
+            self.bottom.opacity = 0
             self.content.add_widget(Label(
                 text="Keine Berechtigung verfügbar",
-                font_size=25,
-                pos_hint={"center_x": 0.5,
-                          "center_y": 0.5}
+                font_size=30,
+                pos_hint={"center_x": 0.5, "center_y": 0.5}
             ))
-            self.bottom.opacity = 0
             return
 
-        self.camera = Camera(
-            play=True,
-            resolution=(1280, 960)  # 4:3 Format
-        )
+        self.bottom.opacity = 1
+
+        self.camera = Camera(play=True, resolution=(1280, 720))
         self.camera.size_hint = (1, 1)
         self.content.add_widget(self.camera)
 
-    # =====================================================
-    # FOTO
-    # =====================================================
-    def take_photo(self, *args):
-        temp = os.path.join(self.photos_dir, "temp.png")
-        self.camera.export_to_png(temp)
-        self.show_preview(temp)
+        Window.bind(on_resize=self.update_orientation)
+        self.update_orientation()
+
+    def update_orientation(self, *args):
+        if hasattr(self, "camera"):
+            if Window.height > Window.width:
+                self.camera.rotation = -90
+            else:
+                self.camera.rotation = 0
+
+    # ================= FOTO =================
+    def take_photo(self, instance):
+        temp_path = os.path.join(self.photos_dir, "temp.png")
+        self.camera.export_to_png(temp_path)
+        self.show_preview(temp_path)
 
     def show_preview(self, path):
         self.content.clear_widgets()
@@ -141,57 +147,35 @@ class Dashboard(BoxLayout):
         layout = FloatLayout()
         self.content.add_widget(layout)
 
-        img = Image(source=path,
-                    allow_stretch=True,
-                    keep_ratio=True)
+        img = Image(source=path, allow_stretch=True)
         layout.add_widget(img)
 
-        if self.is_arduino_on():
+        if self.get_setting("arduino") == "Ja":
             self.draw_red_dot(layout)
 
-        btn_retry = Button(
-            text="Wiederholen",
-            size_hint=(0.3, 0.1),
-            pos_hint={"x": 0.1, "y": 0.05}
-        )
+        btn_retry = Button(text="Wiederholen",
+                           size_hint=(0.3, 0.12),
+                           pos_hint={"x": 0.1, "y": 0.05})
         btn_retry.bind(on_press=lambda x: self.show_camera())
         layout.add_widget(btn_retry)
 
-        btn_save = Button(
-            text="Speichern",
-            size_hint=(0.3, 0.1),
-            pos_hint={"x": 0.6, "y": 0.05}
-        )
-        btn_save.bind(on_press=lambda x: self.save_photo(path))
+        btn_save = Button(text="Speichern",
+                          size_hint=(0.3, 0.12),
+                          pos_hint={"x": 0.6, "y": 0.05})
+        btn_save.bind(on_press=lambda x: self.save_auto(path))
         layout.add_widget(btn_save)
 
-    def save_photo(self, temp):
-        number = self.get_next_number()
-        filename = f"{number:04d}.png"
-        final = os.path.join(self.photos_dir, filename)
+    def save_auto(self, temp_path):
+        files = [f for f in os.listdir(self.photos_dir)
+                 if f.endswith(".png") and f != "temp.png"]
 
-        shutil.move(temp, final)
+        filename = f"{len(files)+1:04d}.png"
+        final_path = os.path.join(self.photos_dir, filename)
 
-        self.store.put(filename,
-                       name=f"{number:04d}",
-                       date=str(datetime.now()))
-
+        os.rename(temp_path, final_path)
         self.show_camera()
 
-    def get_next_number(self):
-        files = [
-            f for f in os.listdir(self.photos_dir)
-            if f.endswith(".png")
-        ]
-        numbers = [
-            int(f.replace(".png", ""))
-            for f in files if f.replace(".png", "").isdigit()
-        ]
-        return max(numbers) + 1 if numbers else 1
-
-    # =====================================================
-    # GALERIE
-    # =====================================================
+    # ================= GALERIE =================
     def show_gallery(self, *args):
         self.content.clear_widgets()
         self.bottom.opacity = 0
@@ -199,42 +183,37 @@ class Dashboard(BoxLayout):
         files = sorted(
             [f for f in os.listdir(self.photos_dir)
              if f.endswith(".png")],
+            key=lambda x: os.path.getmtime(
+                os.path.join(self.photos_dir, x)),
             reverse=True
         )
 
         if not files:
             self.content.add_widget(Label(
                 text="Noch keine Fotos verfügbar",
-                font_size=22,
-                pos_hint={"center_x": 0.5,
-                          "center_y": 0.5}
+                font_size=25,
+                pos_hint={"center_x": 0.5, "center_y": 0.5}
             ))
             return
 
         scroll = ScrollView()
-        grid = GridLayout(cols=2,
-                          spacing=10,
-                          padding=10,
-                          size_hint_y=None)
-        grid.bind(minimum_height=grid.setter("height"))
+        grid = GridLayout(cols=2, spacing=10, size_hint_y=None)
+        grid.bind(minimum_height=grid.setter('height'))
 
         for file in files:
-            path = os.path.join(self.photos_dir, file)
+            img_path = os.path.join(self.photos_dir, file)
 
-            box = FloatLayout(size_hint_y=None,
-                              height=dp(200))
+            box = FloatLayout(size_hint_y=None, height=250)
 
-            img = Image(source=path,
-                        allow_stretch=True,
-                        keep_ratio=True)
+            img = Image(source=img_path, allow_stretch=True)
             box.add_widget(img)
 
-            if self.is_arduino_on():
+            if self.get_setting("arduino") == "Ja":
                 self.draw_red_dot(box)
 
             btn = Button(background_color=(0, 0, 0, 0))
-            btn.bind(on_press=lambda x,
-                     p=path: self.open_image(p))
+            btn.bind(on_press=lambda x, f=file:
+                     self.open_image_view(f))
             box.add_widget(btn)
 
             grid.add_widget(box)
@@ -242,184 +221,70 @@ class Dashboard(BoxLayout):
         scroll.add_widget(grid)
         self.content.add_widget(scroll)
 
-    # =====================================================
-    # EINZELBILD
-    # =====================================================
-    def open_image(self, path):
-        self.content.clear_widgets()
-
-        layout = FloatLayout()
-        self.content.add_widget(layout)
-
-        img = Image(source=path,
-                    allow_stretch=True,
-                    keep_ratio=True)
-        layout.add_widget(img)
-
-        if self.is_arduino_on():
-            self.draw_red_dot(layout)
-
-        filename = os.path.basename(path)
-        name = self.store.get(filename)["name"] \
-            if self.store.exists(filename) else filename
-
-        label = Label(text=name,
-                      size_hint=(0.6, 0.1),
-                      pos_hint={"x": 0.05, "y": 0.02})
-        layout.add_widget(label)
-
-        info = Button(text="i",
-                      size_hint=(0.15, 0.1),
-                      pos_hint={"right": 0.95,
-                                "y": 0.02})
-        info.bind(on_press=lambda x:
-                  self.show_info(path))
-        layout.add_widget(info)
-
-    # =====================================================
-    # INFO POPUP
-    # =====================================================
-    def show_info(self, path):
-        filename = os.path.basename(path)
-
-        data = self.store.get(filename) \
-            if self.store.exists(filename) else {}
-
-        box = BoxLayout(orientation="vertical",
-                        spacing=10,
-                        padding=10)
-
-        txt = TextInput(text=data.get("name", filename))
-        box.add_widget(txt)
-
-        box.add_widget(Label(
-            text="Datum:\n" + data.get("date", "")
-        ))
-
-        save = Button(text="Umbenennen")
-        save.bind(on_press=lambda x:
-                  self.rename_photo(path, txt.text))
-        box.add_widget(save)
-
-        delete = Button(text="Foto löschen")
-        delete.bind(on_press=lambda x:
-                    self.confirm_delete(path))
-        box.add_widget(delete)
-
-        Popup(title="Info",
-              content=box,
-              size_hint=(0.8, 0.7)).open()
-
-    def rename_photo(self, path, new_name):
-        filename = os.path.basename(path)
-        if self.store.exists(filename):
-            data = self.store.get(filename)
-            self.store.put(filename,
-                           name=new_name,
-                           date=data["date"])
-
-    def confirm_delete(self, path):
-        box = BoxLayout(orientation="vertical")
-        box.add_widget(Label(
-            text="Wirklich löschen?"
-        ))
-
-        yes = Button(text="Ja")
-        yes.bind(on_press=lambda x:
-                 self.delete_photo(path))
-
-        box.add_widget(yes)
-
-        Popup(title="Sicher?",
-              content=box,
-              size_hint=(0.6, 0.4)).open()
-
-    def delete_photo(self, path):
-        os.remove(path)
-        self.show_gallery()
-
-    # =====================================================
-    # SETTINGS
-    # =====================================================
-    def show_settings(self, *args):
-        self.content.clear_widgets()
-        self.bottom.opacity = 0
-
-        layout = BoxLayout(orientation="vertical",
-                           spacing=20,
-                           padding=20)
-
-        layout.add_widget(Label(
-            text="Einstellung",
-            font_size=28,
-            size_hint=(1, 0.2)
-        ))
-
-        layout.add_widget(
-            self.settings_row(
-                "Daten von Arduino",
-                "arduino"
-            )
-        )
-
-        layout.add_widget(
-            self.settings_row(
-                "Mit Winkel",
-                "winkel"
-            )
-        )
-
-        self.content.add_widget(layout)
-
-    def settings_row(self, text, key):
-        row = BoxLayout()
-
-        row.add_widget(Label(text=text))
-
-        current = self.store.get(key)["value"] \
-            if self.store.exists(key) else "Nein"
-
-        for val in ["Ja", "Nein"]:
-            color = (0, 0.5, 0, 1) \
-                if val == current else (1, 1, 1, 1)
-
-            btn = Button(text=val,
-                         background_color=color)
-            btn.bind(on_press=lambda x,
-                     v=val: self.set_setting(key, v))
-            row.add_widget(btn)
-
-        return row
-
-    def set_setting(self, key, value):
-        self.store.put(key, value=value)
-        self.show_settings()
-
-    def is_arduino_on(self):
-        return self.store.exists("arduino") and \
-               self.store.get("arduino")["value"] == "Ja"
-
-    # =====================================================
-    # RED DOT
-    # =====================================================
+    # ================= RED DOT =================
     def draw_red_dot(self, parent):
         with parent.canvas:
             Color(1, 0, 0, 1)
-            Ellipse(size=(dp(20), dp(20)),
-                    pos=(dp(10),
-                         parent.height - dp(30)))
+            Ellipse(size=(dp(18), dp(18)),
+                    pos=(dp(8), parent.height - dp(26)))
 
-    # =====================================================
-    # HELP
-    # =====================================================
-    def show_help(self, *args):
+    # ================= EINSTELLUNGEN =================
+    def show_extra(self, *args):
         self.content.clear_widgets()
         self.bottom.opacity = 0
 
+        layout = GridLayout(cols=3, spacing=10, padding=20)
+
+        layout.add_widget(Label(text="Daten von Arduino"))
+        ja1 = Button(text="Ja")
+        nein1 = Button(text="Nein")
+        layout.add_widget(ja1)
+        layout.add_widget(nein1)
+
+        layout.add_widget(Label(text="Mit Winkel"))
+        ja2 = Button(text="Ja")
+        nein2 = Button(text="Nein")
+        layout.add_widget(ja2)
+        layout.add_widget(nein2)
+
+        # gespeicherte Werte laden
+        self.update_toggle(ja1, nein1,
+                           self.get_setting("arduino"))
+        self.update_toggle(ja2, nein2,
+                           self.get_setting("winkel"))
+
+        ja1.bind(on_press=lambda x:
+                 self.save_toggle("arduino", "Ja", ja1, nein1))
+        nein1.bind(on_press=lambda x:
+                   self.save_toggle("arduino", "Nein", nein1, ja1))
+
+        ja2.bind(on_press=lambda x:
+                 self.save_toggle("winkel", "Ja", ja2, nein2))
+        nein2.bind(on_press=lambda x:
+                   self.save_toggle("winkel", "Nein", nein2, ja2))
+
+        self.content.add_widget(layout)
+
+    def save_toggle(self, key, value, active, inactive):
+        self.set_setting(key, value)
+        active.background_color = (0, 0.6, 0, 1)
+        inactive.background_color = (1, 1, 1, 1)
+
+    def update_toggle(self, ja, nein, value):
+        if value == "Ja":
+            ja.background_color = (0, 0.6, 0, 1)
+            nein.background_color = (1, 1, 1, 1)
+        else:
+            nein.background_color = (0, 0.6, 0, 1)
+            ja.background_color = (1, 1, 1, 1)
+
+    # ================= HELP =================
+    def show_help(self, *args):
+        self.content.clear_widgets()
+        self.bottom.opacity = 0
         self.content.add_widget(Label(
-            text="Hilfe\n\nK = Kamera\nG = Galerie\nE = Einstellungen",
-            font_size=24,
-            halign="center",
+            text="Hilfe",
+            font_size=40,
             pos_hint={"center_x": 0.5,
                       "center_y": 0.5}
         ))
