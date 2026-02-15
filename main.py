@@ -13,7 +13,7 @@ from kivy.uix.popup import Popup
 from kivy.uix.textinput import TextInput
 from kivy.core.window import Window
 from kivy.metrics import dp
-from kivy.graphics import Color, Ellipse
+from kivy.graphics import PushMatrix, PopMatrix, Rotate
 
 Window.clearcolor = (0.1, 0.1, 0.12, 1)
 
@@ -68,64 +68,36 @@ class Dashboard(BoxLayout):
             pos_hint={"center_x": 0.5, "center_y": 0.5}
         )
 
-        with self.capture_button.canvas.before:
-            Color(1, 1, 1, 1)
-            self.circle = Ellipse(size=self.capture_button.size,
-                                  pos=self.capture_button.pos)
-
-        self.capture_button.bind(pos=self.update_circle,
-                                 size=self.update_circle)
-
         self.capture_button.bind(on_press=self.take_photo)
         self.bottom.add_widget(self.capture_button)
 
-    def update_circle(self, *args):
-        self.circle.pos = self.capture_button.pos
-        self.circle.size = self.capture_button.size
-
-   
+    # ================= CAMERA =================
     def show_camera(self, *args):
-
         self.content.clear_widgets()
-
-        # -------------------------------
-        # >>>>> HIER IST DIE KAMERA <<<<<
-        # -------------------------------
+        self.bottom.opacity = 1
 
         self.camera = Camera(play=True, resolution=(1280, 720))
-        self.camera.size_hint = (1, 0.9)
-        self.camera.pos_hint = {"top": 1}
-        self.content.add_widget(self.camera)
+        self.camera.size_hint = (1, 1)
 
-        self.update_orientation()
-        # =========================================================
-        # 🔥🔥🔥 HIER WIRD DIE KAMERA 90° NACH RECHTS GEDREHT 🔥🔥🔥
-        # =========================================================
+        # ===================== KAMERA GEDREHT =====================
         with self.camera.canvas.before:
             PushMatrix()
             self.rotation = Rotate(
-                angle=-90,   # ← HIER WIRD GEDREHT (90° NACH RECHTS)
+                angle=-90,  # ← wie im 2. Code, Kamera 90° drehen
                 origin=self.camera.center
             )
-
         with self.camera.canvas.after:
             PopMatrix()
 
-        # Rotation dynamisch aktualisieren
         self.camera.bind(pos=self.update_rotation_origin,
                          size=self.update_rotation_origin)
-
-        # =========================================================
+        # ============================================================
 
         self.content.add_widget(self.camera)
 
-        # Runder weißer Kamera Button
-        capture_btn = Button(
-            size_hint=(None, None),
-            size=(90, 90),
-    def show_camera(self, *args):
-        capture_btn.bind(on_press=self.take_photo)
-        self.content.add_widget(capture_btn)
+    def update_rotation_origin(self, *args):
+        if hasattr(self, "rotation"):
+            self.rotation.origin = self.camera.center
 
     # ================= FOTO =================
     def take_photo(self, instance):
@@ -175,7 +147,7 @@ class Dashboard(BoxLayout):
         self.bottom.opacity = 0
 
         scroll = ScrollView()
-        grid = GridLayout(cols=2, spacing=10, size_hint_y=None)
+        grid = GridLayout(cols=2, spacing=20, padding=20, size_hint_y=None)
         grid.bind(minimum_height=grid.setter('height'))
 
         files = sorted([
@@ -184,165 +156,43 @@ class Dashboard(BoxLayout):
         ])
 
         for file in files:
-            img_path = os.path.join(self.photos_dir, file)
+            path = os.path.join(self.photos_dir, file)
 
-            btn = Button(
-                background_normal=img_path,
-                background_down=img_path,
+            img = Button(
+                background_normal=path,
                 size_hint_y=None,
-                height=250
+                height=350
             )
-            btn.bind(on_press=lambda x, f=file: self.open_image_view(f))
-            grid.add_widget(btn)
+
+            grid.add_widget(img)
 
         scroll.add_widget(grid)
         self.content.add_widget(scroll)
 
-    # ================= EINZELANSICHT =================
-    def open_image_view(self, filename):
+    # ================= HELP =================
+    def show_help(self, *args):
         self.content.clear_widgets()
-
-        layout = FloatLayout()
-        self.content.add_widget(layout)
-
-        path = os.path.join(self.photos_dir, filename)
-
-        img = Image(source=path, allow_stretch=True)
-        layout.add_widget(img)
-
-        name_label = Label(
-            text=filename.replace(".png", ""),
-            size_hint=(0.6, 0.1),
-            pos_hint={"x": 0.05, "y": 0}
-        )
-        layout.add_widget(name_label)
-
-        info_btn = Button(
-            text="i",
-            size_hint=(0.1, 0.1),
-            pos_hint={"right": 0.95, "y": 0}
-        )
-        info_btn.bind(on_press=lambda x: self.show_info_popup(filename))
-        layout.add_widget(info_btn)
-
-    # ================= INFO POPUP =================
-    def show_info_popup(self, filename):
-
-        path = os.path.join(self.photos_dir, filename)
-        timestamp = os.path.getmtime(path)
-        date_str = datetime.datetime.fromtimestamp(
-            timestamp).strftime("%d.%m.%Y %H:%M")
-
-        layout = BoxLayout(orientation="vertical", spacing=10, padding=10)
-
-        name_input = TextInput(
-            text=filename.replace(".png", ""),
-            multiline=False
-        )
-        layout.add_widget(name_input)
-
-        layout.add_widget(Label(text=date_str))
-
-        delete_btn = Button(text="Foto löschen")
-        layout.add_widget(delete_btn)
-
-        popup = Popup(title="Info", content=layout,
-                      size_hint=(0.8, 0.6))
-
-        delete_btn.bind(
-            on_press=lambda x: self.confirm_delete(filename, popup)
-        )
-
-        name_input.bind(
-            on_text_validate=lambda x: self.rename_file(
-                filename, name_input.text, popup)
-        )
-
-        popup.open()
-
-    def rename_file(self, old_name, new_name, popup):
-        old_path = os.path.join(self.photos_dir, old_name)
-        new_filename = new_name + ".png"
-        new_path = os.path.join(self.photos_dir, new_filename)
-
-        if not os.path.exists(new_path):
-            os.rename(old_path, new_path)
-
-        popup.dismiss()
-        self.show_gallery()
-
-    def confirm_delete(self, filename, parent_popup):
-
-        layout = BoxLayout(orientation="vertical")
-
-        layout.add_widget(Label(text="Wirklich löschen?"))
-
-        buttons = BoxLayout(size_hint=(1, 0.4))
-
-        btn_yes = Button(text="Ja")
-        btn_no = Button(text="Nein")
-
-        buttons.add_widget(btn_yes)
-        buttons.add_widget(btn_no)
-
-        layout.add_widget(buttons)
-
-        popup = Popup(title="Sicherheitsfrage",
-                      content=layout,
-                      size_hint=(0.7, 0.4))
-
-        btn_yes.bind(on_press=lambda x: self.delete_file(
-            filename, popup, parent_popup))
-        btn_no.bind(on_press=popup.dismiss)
-
-        popup.open()
-
-    def delete_file(self, filename, popup, parent_popup):
-        path = os.path.join(self.photos_dir, filename)
-        if os.path.exists(path):
-            os.remove(path)
-
-        popup.dismiss()
-        parent_popup.dismiss()
-        self.show_gallery()
+        self.content.add_widget(Label(text="Hilfe"))
 
     # ================= EXTRA =================
     def show_extra(self, *args):
         self.content.clear_widgets()
-        self.bottom.opacity = 0
 
-        layout = GridLayout(cols=3, spacing=10, padding=20)
+        layout = GridLayout(cols=3, padding=40, spacing=20)
 
         layout.add_widget(Label(text="Daten von Arduino"))
-        ja1 = Button(text="Ja")
-        nein1 = Button(text="Nein")
-        ja1.bind(on_press=lambda x: self.toggle(ja1, nein1))
-        nein1.bind(on_press=lambda x: self.toggle(nein1, ja1))
+        ja1 = Button(text="Ja", size_hint=(None,None), size=(100,50))
+        nein1 = Button(text="Nein", size_hint=(None,None), size=(100,50))
         layout.add_widget(ja1)
         layout.add_widget(nein1)
 
         layout.add_widget(Label(text="Mit Winkel"))
-        ja2 = Button(text="Ja")
-        nein2 = Button(text="Nein")
-        ja2.bind(on_press=lambda x: self.toggle(ja2, nein2))
-        nein2.bind(on_press=lambda x: self.toggle(nein2, ja2))
+        ja2 = Button(text="Ja", size_hint=(None,None), size=(100,50))
+        nein2 = Button(text="Nein", size_hint=(None,None), size=(100,50))
         layout.add_widget(ja2)
         layout.add_widget(nein2)
 
         self.content.add_widget(layout)
-
-    def toggle(self, active, inactive):
-        active.background_color = (0, 1, 0, 1)
-        inactive.background_color = (1, 1, 1, 1)
-
-    # ================= HELP =================
-    def show_help(self, *args):
-        self.content.clear_widgets()
-        self.bottom.opacity = 0
-        self.content.add_widget(Label(text="Hilfe",
-                                      font_size=40,
-                                      pos_hint={"center_x": 2.5,
-                                                "center_y": 2.5}))
 
 
 class MainApp(App):
