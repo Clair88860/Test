@@ -1,5 +1,6 @@
 import os
 import datetime
+
 from kivy.app import App
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.boxlayout import BoxLayout
@@ -12,13 +13,12 @@ from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.graphics import PushMatrix, PopMatrix, Rotate
 
+# ANDROID
 from jnius import autoclass, PythonJavaClass, java_method
+from android.permissions import request_permissions, Permission
+from android import api_version
 
-# ANDROID BLE
 BluetoothAdapter = autoclass('android.bluetooth.BluetoothAdapter')
-BluetoothManager = autoclass('android.bluetooth.BluetoothManager')
-BluetoothGattCallback = autoclass('android.bluetooth.BluetoothGattCallback')
-ScanCallback = autoclass('android.bluetooth.le.ScanCallback')
 UUID = autoclass('java.util.UUID')
 
 SERVICE_UUID = UUID.fromString("0000180a-0000-1000-8000-00805f9b34fb")
@@ -26,7 +26,7 @@ CHAR_UUID = UUID.fromString("00002a57-0000-1000-8000-00805f9b34fb")
 
 
 # =========================================================
-# GATT CALLBACK (ECHT)
+# GATT CALLBACK
 # =========================================================
 
 class GattCallback(PythonJavaClass):
@@ -40,7 +40,6 @@ class GattCallback(PythonJavaClass):
     @java_method('(Landroid/bluetooth/BluetoothGatt;II)V')
     def onConnectionStateChange(self, gatt, status, newState):
         if newState == 2:  # connected
-            self.app.status_text = "Verbunden ✔"
             gatt.discoverServices()
 
     @java_method('(Landroid/bluetooth/BluetoothGatt;I)V')
@@ -60,7 +59,7 @@ class GattCallback(PythonJavaClass):
 # SCAN CALLBACK
 # =========================================================
 
-class BLEScanCallback(PythonJavaClass):
+class ScanCallback(PythonJavaClass):
     __javainterfaces__ = ['android/bluetooth/le/ScanCallback']
     __javacontext__ = 'app'
 
@@ -94,8 +93,7 @@ class Dashboard(FloatLayout):
         self.north_value = "--"
 
         self.build_topbar()
-        self.build_camera()
-        self.build_buttons()
+        self.show_camera()
 
     # =====================================================
     # UI
@@ -138,7 +136,7 @@ class Dashboard(FloatLayout):
 
         self.add_widget(self.camera)
 
-    def build_buttons(self):
+        # Speichern Button
         self.capture_btn = Button(text="Speichern",
                                   size_hint=(None,None),
                                   size=(dp(120),dp(50)),
@@ -146,6 +144,7 @@ class Dashboard(FloatLayout):
         self.capture_btn.bind(on_press=self.capture)
         self.add_widget(self.capture_btn)
 
+        # Wiederholen Button
         self.repeat_btn = Button(text="Wiederholen",
                                  size_hint=(None,None),
                                  size=(dp(120),dp(50)),
@@ -158,11 +157,24 @@ class Dashboard(FloatLayout):
     # =====================================================
 
     def start_scan(self):
+
+        if api_version >= 31:
+            request_permissions([
+                Permission.BLUETOOTH_SCAN,
+                Permission.BLUETOOTH_CONNECT,
+                Permission.ACCESS_FINE_LOCATION
+            ])
+        else:
+            request_permissions([Permission.ACCESS_FINE_LOCATION])
+
         if not self.adapter:
+            self.status_label.text = "Bluetooth nicht verfügbar"
             return
 
+        self.status_label.text = "Scanne..."
+
         self.scanner = self.adapter.getBluetoothLeScanner()
-        self.scan_callback = BLEScanCallback(self)
+        self.scan_callback = ScanCallback(self)
         self.scanner.startScan(self.scan_callback)
 
     def stop_scan(self):
@@ -188,7 +200,6 @@ class Dashboard(FloatLayout):
         self.clear_widgets()
         self.build_topbar()
         self.build_camera()
-        self.build_buttons()
 
     def show_a(self,*args):
         self.clear_widgets()
@@ -249,7 +260,7 @@ class Dashboard(FloatLayout):
         self.clear_widgets()
         self.build_topbar()
         self.add_widget(Label(
-            text="Bei Fragen oder Problemen können Sie sich per E-Mail melden."
+            text="Bei Fragen oder Problemen können Sie sich jederzeit per E-Mail melden."
         ))
 
     # =====================================================
