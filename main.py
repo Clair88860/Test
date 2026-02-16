@@ -13,7 +13,8 @@ from kivy.uix.image import Image
 from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
 from kivy.clock import Clock
-from kivy.graphics import PushMatrix, PopMatrix, Rotate
+from kivy.graphics import PushMatrix, PopMatrix, Rotate, Color, Ellipse
+from kivy.metrics import dp
 from kivy.utils import platform
 
 # Android BLE Imports
@@ -80,6 +81,7 @@ class GattCallback(PythonJavaClass):
 class MainApp(App):
     def build(self):
         self.user_data_dir = App.get_running_app().user_data_dir
+        os.makedirs(self.user_data_dir, exist_ok=True)
 
         self.root = BoxLayout(orientation="vertical")
 
@@ -115,7 +117,7 @@ class MainApp(App):
 
         return self.root
 
-    # ===== Update BLE Winkel =====
+    # ===== BLE Winkel Update =====
     def update_angle(self, angle):
         self.angle = angle
         self.direction = self.calc_direction(angle)
@@ -134,10 +136,9 @@ class MainApp(App):
         return "Nordwest"
 
     def update_dashboard(self):
-        # Dashboard oben bleibt sichtbar, keine Änderung nötig
-        pass
+        pass  # Dashboard oben bleibt fix
 
-    # ===== Camera =====
+    # ===== Kamera =====
     def show_camera(self,*args):
         self.content.clear_widgets()
         layout = BoxLayout(orientation="vertical")
@@ -146,14 +147,42 @@ class MainApp(App):
         layout.add_widget(self.camera)
 
         btn = Button(text="Foto aufnehmen",size_hint_y=0.15)
+        btn.bind(on_press=self.take_photo)
         layout.add_widget(btn)
         self.content.add_widget(layout)
 
-    # ===== Gallery =====
+    def take_photo(self, instance):
+        files = sorted([f for f in os.listdir(self.user_data_dir) if f.endswith(".png")])
+        number = len(files) + 1
+        filename = f"{number:04d}.png"
+        path = os.path.join(self.user_data_dir, filename)
+        self.camera.export_to_png(path)
+        self.show_preview(path)
+
+    def show_preview(self, path):
+        self.content.clear_widgets()
+        layout = BoxLayout(orientation="vertical")
+        img = Image(source=path)
+        layout.add_widget(img)
+        btns = BoxLayout(size_hint_y=0.2)
+        save = Button(text="Speichern")
+        repeat = Button(text="Wiederholen")
+        save.bind(on_press=lambda x: self.show_gallery())
+        repeat.bind(on_press=lambda x: self.show_camera())
+        btns.add_widget(save)
+        btns.add_widget(repeat)
+        layout.add_widget(btns)
+        self.content.add_widget(layout)
+
+    # ===== Galerie (Demo) =====
     def show_gallery(self,*args):
         self.content.clear_widgets()
+        scroll = ScrollView()
+        grid = BoxLayout(orientation="vertical")
         lbl = Label(text="Galerie (Demo)")
-        self.content.add_widget(lbl)
+        grid.add_widget(lbl)
+        scroll.add_widget(grid)
+        self.content.add_widget(scroll)
 
     # ===== A-Seite: Arduino Daten =====
     def show_a(self,*args):
@@ -193,5 +222,7 @@ class MainApp(App):
         ja4 = ToggleButton(text="Ja", group="winkel"); nein4 = ToggleButton(text="Nein", group="winkel", state="down")
         h4.add_widget(ja4); h4.add_widget(nein4)
         vbox.add_widget(h4)
-
         self.content.add_widget(vbox)
+
+if __name__ == "__main__":
+    MainApp().run()
