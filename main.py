@@ -14,15 +14,15 @@ from kivy.uix.image import Image
 from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
 from kivy.clock import Clock
-from kivy.graphics import PushMatrix, PopMatrix, Rotate, Color, Ellipse
 from kivy.metrics import dp
 from kivy.utils import platform
 
 # Android BLE Imports
-if platform == "android":
+IS_ANDROID = platform == "android"
+if IS_ANDROID:
     from jnius import autoclass, PythonJavaClass, java_method
+    from android.permissions import request_permissions, Permission
     BluetoothAdapter = autoclass("android.bluetooth.BluetoothAdapter")
-    BluetoothDevice = autoclass("android.bluetooth.BluetoothDevice")
     BluetoothGattDescriptor = autoclass("android.bluetooth.BluetoothGattDescriptor")
     UUID = autoclass("java.util.UUID")
     PythonActivity = autoclass("org.kivy.android.PythonActivity")
@@ -33,60 +33,55 @@ else:
 
 CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
 
-# ===== BLE Callbacks =====
-class BLEScanCallback(PythonJavaClass):
-    __javainterfaces__ = ["android/bluetooth/BluetoothAdapter$LeScanCallback"]
-    def __init__(self, app):
-        super().__init__()
-        self.app = app
-    @java_method("(Landroid/bluetooth/BluetoothDevice;I[B)V")
-    def onLeScan(self, device, rssi, scanRecord):
-        if device.getName() == "Arduino_GCS":
-            self.app.connect(device)
+# ===== BLE Callbacks (nur Android) =====
+if IS_ANDROID:
+    class BLEScanCallback(PythonJavaClass):
+        __javainterfaces__ = ["android/bluetooth/BluetoothAdapter$LeScanCallback"]
+        def __init__(self, app): super().__init__(); self.app = app
+        @java_method("(Landroid/bluetooth/BluetoothDevice;I[B)V")
+        def onLeScan(self, device, rssi, scanRecord):
+            if device.getName() == "Arduino_GCS":
+                self.app.connect(device)
 
-class GattCallback(PythonJavaClass):
-    __javainterfaces__ = ["android/bluetooth/BluetoothGattCallback"]
-    def __init__(self, app):
-        super().__init__()
-        self.app = app
-    @java_method("(Landroid/bluetooth/BluetoothGatt;II)V")
-    def onConnectionStateChange(self, gatt, status, newState):
-        if newState == 2:
-            Clock.schedule_once(lambda dt: gatt.discoverServices(),1)
-    @java_method("(Landroid/bluetooth/BluetoothGatt;I)V")
-    def onServicesDiscovered(self, gatt, status):
-        services = gatt.getServices()
-        for i in range(services.size()):
-            s = services.get(i)
-            if "180a" in s.getUuid().toString().lower():
-                chars = s.getCharacteristics()
-                for j in range(chars.size()):
-                    c = chars.get(j)
-                    if "2a57" in c.getUuid().toString().lower():
-                        gatt.setCharacteristicNotification(c, True)
-                        d = c.getDescriptor(UUID.fromString(CCCD_UUID))
-                        if d:
-                            d.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-                            gatt.writeDescriptor(d)
-    @java_method("(Landroid/bluetooth/BluetoothGatt;Landroid/bluetooth/BluetoothGattCharacteristic;)V")
-    def onCharacteristicChanged(self, gatt, characteristic):
-        data = characteristic.getValue()
-        if data:
-            try:
-                angle = struct.unpack('<h', bytes(data))[0]
-                Clock.schedule_once(lambda dt: self.app.update_angle(angle))
-            except:
-                pass
+    class GattCallback(PythonJavaClass):
+        __javainterfaces__ = ["android/bluetooth/BluetoothGattCallback"]
+        def __init__(self, app): super().__init__(); self.app = app
+        @java_method("(Landroid/bluetooth/BluetoothGatt;II)V")
+        def onConnectionStateChange(self, gatt, status, newState):
+            if newState == 2: Clock.schedule_once(lambda dt: gatt.discoverServices(),1)
+        @java_method("(Landroid/bluetooth/BluetoothGatt;I)V")
+        def onServicesDiscovered(self, gatt, status):
+            services = gatt.getServices()
+            for i in range(services.size()):
+                s = services.get(i)
+                if "180a" in s.getUuid().toString().lower():
+                    chars = s.getCharacteristics()
+                    for j in range(chars.size()):
+                        c = chars.get(j)
+                        if "2a57" in c.getUuid().toString().lower():
+                            gatt.setCharacteristicNotification(c, True)
+                            d = c.getDescriptor(UUID.fromString(CCCD_UUID))
+                            if d:
+                                d.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                                gatt.writeDescriptor(d)
+        @java_method("(Landroid/bluetooth/BluetoothGatt;Landroid/bluetooth/BluetoothGattCharacteristic;)V")
+        def onCharacteristicChanged(self, gatt, characteristic):
+            data = characteristic.getValue()
+            if data:
+                try:
+                    angle = struct.unpack('<h', bytes(data))[0]
+                    Clock.schedule_once(lambda dt: self.app.update_angle(angle))
+                except: pass
 
 # ===== Main App =====
 class MainApp(App):
     def build(self):
-        self.user_data_dir = App.get_running_app().user_data_dir
+        self.user_data_dir = App.get_running_app().user_data_dir or os.getcwd()
         os.makedirs(self.user_data_dir, exist_ok=True)
 
         self.root = BoxLayout(orientation="vertical")
 
-        # ===== Dashboard Buttons oben =====
+        # Dashboard fix oben
         self.dashboard = BoxLayout(size_hint_y=0.1)
         self.btn_camera = Button(text="K"); self.btn_camera.bind(on_press=self.show_camera)
         self.btn_gallery = Button(text="G"); self.btn_gallery.bind(on_press=self.show_gallery)
@@ -96,7 +91,7 @@ class MainApp(App):
             self.dashboard.add_widget(b)
         self.root.add_widget(self.dashboard)
 
-        # ===== Content Bereich =====
+        # Content-Bereich
         self.content = BoxLayout()
         self.root.add_widget(self.content)
 
@@ -113,8 +108,13 @@ class MainApp(App):
         # Startseite Kamera
         self.show_camera()
 
-        # Dashboard Update jede Sekunde
+        # Update jede Sekunde
         Clock.schedule_interval(lambda dt: self.update_dashboard(), 1)
+
+        # Berechtigungen Android
+        if IS_ANDROID:
+            request_permissions([Permission.CAMERA, Permission.ACCESS_FINE_LOCATION, 
+                                 Permission.BLUETOOTH_SCAN, Permission.BLUETOOTH_CONNECT])
 
         return self.root
 
@@ -137,7 +137,7 @@ class MainApp(App):
         return "Nordwest"
 
     def update_dashboard(self):
-        pass  # Dashboard oben bleibt fix
+        pass  # Dashboard fix oben
 
     # ===== Kamera =====
     def show_camera(self,*args):
@@ -145,7 +145,6 @@ class MainApp(App):
         layout = BoxLayout(orientation="vertical")
         self.camera = Camera(play=True)
         layout.add_widget(self.camera)
-
         btn = Button(text="Foto aufnehmen",size_hint_y=0.15)
         btn.bind(on_press=self.take_photo)
         layout.add_widget(btn)
@@ -204,13 +203,11 @@ class MainApp(App):
         img_path = os.path.join(self.user_data_dir, filename)
         img = Image(source=img_path)
         img_layout.add_widget(img)
-        # Overlay Norden wenn Arduino aktiviert
         if self.arduino_enabled:
             lbl = Label(text="Norden", color=(1,1,1,1), size_hint=(None,None), pos=(dp(10), dp(10)))
             img_layout.add_widget(lbl)
         layout.add_widget(img_layout)
 
-        # Unter dem Bild: Name + i-Button
         bottom = BoxLayout(size_hint_y=0.15)
         name_lbl = Label(text=filename.replace(".png",""))
         info_btn = Button(text="i", size_hint=(None,None), size=(dp(40),dp(40)))
@@ -220,7 +217,7 @@ class MainApp(App):
         layout.add_widget(bottom)
         self.content.add_widget(layout)
 
-    # ===== Info Popup für Einzelbild =====
+    # ===== Info Popup =====
     def show_info(self, filename):
         path = os.path.join(self.user_data_dir, filename)
         box = BoxLayout(orientation="vertical", spacing=10)
@@ -261,7 +258,7 @@ class MainApp(App):
         os.remove(path)
         self.show_gallery()
 
-    # ===== A-Seite: Arduino Daten =====
+    # ===== A-Seite =====
     def show_a(self,*args):
         self.content.clear_widgets()
         vbox = BoxLayout(orientation="vertical")
@@ -269,7 +266,7 @@ class MainApp(App):
         vbox.add_widget(self.arduino_label)
         self.content.add_widget(vbox)
 
-    # ===== E-Seite: Einstellungen =====
+    # ===== E-Seite =====
     def show_e(self,*args):
         self.content.clear_widgets()
         vbox = BoxLayout(orientation="vertical", padding=10, spacing=10)
