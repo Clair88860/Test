@@ -23,8 +23,8 @@ entrypoint = main.py
 orientation = portrait
 requirements = python3,kivy,pyjnius,android,pillow
 
-android.permissions = CAMERA,BLUETOOTH_SCAN, BLUETOOTH_CONNECT, ACCESS_FINE_LOCATION,BLUETOOTH, BLUETOOTH_ADMIN, ACCESS_COARSE_LOCATION
-
+android.permissions = CAMERA,BLUETOOTH_SCAN, BLUETOOTH_CONNECT, ACCESS_FINE_LOCATION,BLUETOOTH, BLUETOOTH_ADMIN, ACCESS_COARSE_LOCATION, BLUETOOTH, BLUETOOTH_ADMIN
+      
 
 # Anzeige
 fullscreen = 0
