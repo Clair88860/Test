@@ -1,29 +1,21 @@
 import os
 import datetime
 from kivy.app import App
-from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.camera import Camera
 from kivy.uix.image import Image
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.popup import Popup
 from kivy.uix.textinput import TextInput
+from kivy.uix.camera import Camera
 from kivy.storage.jsonstore import JsonStore
-from kivy.clock import Clock
+from kivy.graphics import PushMatrix, PopMatrix, Rotate, Ellipse, Color
 from kivy.metrics import dp
-
+from kivy.clock import Clock
 from PIL import Image as PILImage
-from PIL import ImageDraw
-from PIL import ImageFont
-
-try:
-    from android.permissions import check_permission, Permission
-except:
-    check_permission = None
-    Permission = None
 
 
 class Dashboard(FloatLayout):
@@ -36,18 +28,67 @@ class Dashboard(FloatLayout):
         app = App.get_running_app()
         self.photos_dir = os.path.join(app.user_data_dir, "photos")
         self.thumb_dir = os.path.join(self.photos_dir, "thumbs")
-
         os.makedirs(self.photos_dir, exist_ok=True)
         os.makedirs(self.thumb_dir, exist_ok=True)
 
-        # Kamera Hintergrund (fullscreen)
-        self.camera = Camera(resolution=(1280, 720), play=True)
-        self.camera.size_hint = (1, 1)
-        self.add_widget(self.camera)
+        self.build_camera()
+        self.build_topbar()
+        self.build_capture_button()
 
-        # Top Menü (liegt drüber)
-        self.topbar = BoxLayout(size_hint=(1, 0.1),
+        Clock.schedule_once(lambda dt: self.show_camera(), 0.5)
+
+    # =====================================================
+    # Kamera
+    # =====================================================
+
+    def build_camera(self):
+        self.camera = Camera(play=True, resolution=(1280, 720))
+        self.camera.size_hint = (.95, .95)
+        self.camera.pos_hint = {"center_x": .5, "center_y": .5}
+
+        with self.camera.canvas.before:
+            PushMatrix()
+            self.rot = Rotate(angle=-90, origin=self.camera.center)
+        with self.camera.canvas.after:
+            PopMatrix()
+
+        self.camera.bind(pos=self.update_rot,
+                         size=self.update_rot)
+
+    def update_rot(self, *args):
+        self.rot.origin = self.camera.center
+
+    def build_capture_button(self):
+        self.capture = Button(
+            size_hint=(None, None),
+            size=(dp(80), dp(80)),
+            pos_hint={"center_x": .5, "y": .05},
+            background_normal="",
+            background_color=(1, 1, 1, 1)
+        )
+
+        with self.capture.canvas.before:
+            Color(1, 1, 1, 1)
+            self.circle = Ellipse(size=self.capture.size,
+                                  pos=self.capture.pos)
+
+        self.capture.bind(pos=self.update_circle,
+                          size=self.update_circle)
+
+        self.capture.bind(on_press=self.take_photo)
+
+    def update_circle(self, *args):
+        self.circle.pos = self.capture.pos
+        self.circle.size = self.capture.size
+
+    # =====================================================
+    # Topbar
+    # =====================================================
+
+    def build_topbar(self):
+        self.topbar = BoxLayout(size_hint=(1, .08),
                                 pos_hint={"top": 1})
+
         for t, f in [
             ("?", self.show_help),
             ("K", self.show_camera),
@@ -58,30 +99,19 @@ class Dashboard(FloatLayout):
             b.bind(on_press=f)
             self.topbar.add_widget(b)
 
-        self.add_widget(self.topbar)
-
-        # Kamera Button (liegt drüber)
-        self.capture_btn = Button(
-            size_hint=(None, None),
-            size=(dp(70), dp(70)),
-            pos_hint={"center_x": .5, "y": .05},
-            background_normal="",
-            background_color=(1, 1, 1, 1)
-        )
-        self.capture_btn.bind(on_press=self.take_photo)
-        self.add_widget(self.capture_btn)
-
-        Clock.schedule_once(lambda dt: self.show_camera(), 0.5)
-
     # =====================================================
-    # Kamera
+    # Kamera anzeigen
     # =====================================================
 
     def show_camera(self, *args):
         self.clear_widgets()
         self.add_widget(self.camera)
         self.add_widget(self.topbar)
-        self.add_widget(self.capture_btn)
+        self.add_widget(self.capture)
+
+    # =====================================================
+    # Foto aufnehmen
+    # =====================================================
 
     def take_photo(self, instance):
         temp = os.path.join(self.photos_dir, "temp.png")
@@ -94,31 +124,23 @@ class Dashboard(FloatLayout):
         else:
             self.preview(temp)
 
-    # =====================================================
-    # Vorschau
-    # =====================================================
-
     def preview(self, path):
         self.clear_widgets()
-
-        img = Image(source=path, allow_stretch=True, keep_ratio=True)
+        img = Image(source=path)
         self.add_widget(img)
 
         btn1 = Button(text="Wiederholen",
                       size_hint=(.3, .1),
                       pos_hint={"x": .1, "y": .05})
         btn1.bind(on_press=lambda x: self.show_camera())
-        self.add_widget(btn1)
 
         btn2 = Button(text="Speichern",
                       size_hint=(.3, .1),
                       pos_hint={"x": .6, "y": .05})
         btn2.bind(on_press=lambda x: self.save_photo(path))
-        self.add_widget(btn2)
 
-    # =====================================================
-    # Speichern + Norden ins Bild einbrennen
-    # =====================================================
+        self.add_widget(btn1)
+        self.add_widget(btn2)
 
     def save_photo(self, path):
         files = [f for f in os.listdir(self.photos_dir)
@@ -128,16 +150,10 @@ class Dashboard(FloatLayout):
         new_path = os.path.join(self.photos_dir, filename)
         os.rename(path, new_path)
 
-        if self.store.exists("arduino") and self.store.get("arduino")["value"]:
-            img = PILImage.open(new_path)
-            draw = ImageDraw.Draw(img)
-            draw.text((img.width - 200, 30), "Norden", fill=(255, 0, 0))
-            img.save(new_path)
-
-        thumb = os.path.join(self.thumb_dir, filename)
+        # Thumbnail
         img = PILImage.open(new_path)
-        img.thumbnail((400, 225))
-        img.save(thumb)
+        img.thumbnail((400, 400))
+        img.save(os.path.join(self.thumb_dir, filename))
 
         self.show_camera()
 
@@ -149,37 +165,34 @@ class Dashboard(FloatLayout):
         self.clear_widgets()
 
         scroll = ScrollView()
-        grid = GridLayout(cols=3,
-                          spacing=10,
-                          padding=10,
-                          size_hint_y=None)
+        grid = GridLayout(cols=3, spacing=10,
+                          padding=10, size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
 
-        files = sorted([f for f in os.listdir(self.photos_dir)
-                        if f.endswith(".png")])
+        files = sorted(os.listdir(self.thumb_dir))
 
         for file in files:
-            layout = BoxLayout(orientation="vertical",
-                               size_hint_y=None,
-                               height=dp(160))
+            layout = FloatLayout(size_hint_y=None,
+                                 height=dp(150))
 
-            img = Image(source=os.path.join(self.thumb_dir, file),
-                        size_hint_y=.8)
+            img = Image(source=os.path.join(self.thumb_dir, file))
+            layout.add_widget(img)
+
+            if self.store.exists("arduino") and self.store.get("arduino")["value"]:
+                n = Label(text="Norden",
+                          size_hint=(None, None),
+                          size=(80, 30),
+                          pos_hint={"right": .98, "top": .98})
+                layout.add_widget(n)
+
+            info = Button(text="i",
+                          size_hint=(None, None),
+                          size=(30, 30),
+                          pos_hint={"right": .98, "y": .02})
+            layout.add_widget(info)
+
             img.bind(on_touch_down=lambda inst, touch, f=file:
                      self.open_image(f) if inst.collide_point(*touch.pos) else None)
-
-            info_row = BoxLayout(size_hint_y=.2)
-
-            number = Label(text=file.replace(".png", ""))
-            info_btn = Button(text="i")
-            info_btn.bind(on_press=lambda x, f=file:
-                          self.show_info(f))
-
-            info_row.add_widget(number)
-            info_row.add_widget(info_btn)
-
-            layout.add_widget(img)
-            layout.add_widget(info_row)
 
             grid.add_widget(layout)
 
@@ -188,7 +201,7 @@ class Dashboard(FloatLayout):
         self.add_widget(self.topbar)
 
     # =====================================================
-    # Einzelansicht
+    # Einzelbild
     # =====================================================
 
     def open_image(self, filename):
@@ -198,116 +211,85 @@ class Dashboard(FloatLayout):
 
         layout = BoxLayout(orientation="vertical")
 
-        img = Image(source=path, allow_stretch=True, keep_ratio=True)
+        img = Image(source=path)
         layout.add_widget(img)
 
-        info = BoxLayout(size_hint_y=.2)
+        bottom = BoxLayout(size_hint_y=.15)
 
-        stat = os.stat(path)
-        dt = datetime.datetime.fromtimestamp(stat.st_mtime)
+        name = Label(text=filename)
+        info = Button(text="i")
+        info.bind(on_press=lambda x: self.image_info(filename))
 
-        name_label = Label(text=f"{filename}\n{dt}")
+        bottom.add_widget(name)
+        bottom.add_widget(info)
 
-        rename = Button(text="Umbenennen")
-        rename.bind(on_press=lambda x:
-                    self.rename_popup(filename))
-
-        delete = Button(text="Löschen")
-        delete.bind(on_press=lambda x:
-                    self.delete_popup(filename))
-
-        info.add_widget(name_label)
-        info.add_widget(rename)
-        info.add_widget(delete)
-
-        layout.add_widget(info)
+        layout.add_widget(bottom)
 
         self.add_widget(layout)
         self.add_widget(self.topbar)
 
-    # =====================================================
-    # Umbenennen
-    # =====================================================
+    def image_info(self, filename):
+        path = os.path.join(self.photos_dir, filename)
+        stat = os.stat(path)
+        dt = datetime.datetime.fromtimestamp(stat.st_mtime)
 
-    def rename_popup(self, filename):
-        box = BoxLayout(orientation="vertical")
-        txt = TextInput(text=filename.replace(".png", ""))
-        btn = Button(text="Speichern")
+        box = BoxLayout(orientation="vertical", spacing=10)
 
-        def rename_file(instance):
-            new_name = txt.text + ".png"
-            os.rename(
-                os.path.join(self.photos_dir, filename),
-                os.path.join(self.photos_dir, new_name)
-            )
-            popup.dismiss()
-            self.show_gallery()
+        box.add_widget(Label(text="Bildinformationen"))
 
-        btn.bind(on_press=rename_file)
-        box.add_widget(txt)
-        box.add_widget(btn)
+        rename = Button(text="Umbenennen")
+        delete = Button(text="Löschen")
 
-        popup = Popup(title="Umbenennen",
+        box.add_widget(Label(text=str(dt)))
+        box.add_widget(rename)
+        box.add_widget(delete)
+
+        popup = Popup(title="Info",
                       content=box,
-                      size_hint=(.7, .5))
-        popup.open()
-
-    # =====================================================
-    # Löschen
-    # =====================================================
-
-    def delete_popup(self, filename):
-        box = BoxLayout(orientation="vertical")
-        box.add_widget(Label(text="Wirklich löschen?"))
-
-        btn_yes = Button(text="Ja")
-        btn_no = Button(text="Nein")
-
-        def delete_file(instance):
-            os.remove(os.path.join(self.photos_dir, filename))
-            popup.dismiss()
-            self.show_gallery()
-
-        btn_yes.bind(on_press=delete_file)
-        btn_no.bind(on_press=lambda x: popup.dismiss())
-
-        box.add_widget(btn_yes)
-        box.add_widget(btn_no)
-
-        popup = Popup(title="Löschen",
-                      content=box,
-                      size_hint=(.6, .4))
+                      size_hint=(.7, .6))
         popup.open()
 
     # =====================================================
     # Einstellungen
     # =====================================================
 
+    def setting_row(self, text, key):
+        row = BoxLayout(size_hint_y=None, height=dp(40))
+        row.add_widget(Label(text=text))
+
+        for value in [True, False]:
+            btn = Button(text="Ja" if value else "Nein",
+                         size_hint=(None, None),
+                         size=(dp(70), dp(35)))
+
+            def set_value(instance, v=value):
+                self.store.put(key, value=v)
+                self.show_settings()
+
+            btn.bind(on_press=set_value)
+
+            if self.store.exists(key) and self.store.get(key)["value"] == value:
+                btn.background_color = (0, .5, 0, 1)
+
+            row.add_widget(btn)
+
+        return row
+
     def show_settings(self, *args):
         self.clear_widgets()
 
         layout = BoxLayout(orientation="vertical",
                            padding=20,
-                           spacing=20)
+                           spacing=15)
 
-        layout.add_widget(Label(text="Automatisch speichern?"))
+        layout.add_widget(Label(text="Einstellungen",
+                                font_size=28,
+                                size_hint_y=None,
+                                height=dp(50)))
 
-        row = BoxLayout(spacing=20)
-
-        yes = Button(text="Ja",
-                     background_color=(0, 1, 0, 1))
-        no = Button(text="Nein",
-                    background_color=(1, 0, 0, 1))
-
-        yes.bind(on_press=lambda x:
-                 self.store.put("auto", value=True))
-        no.bind(on_press=lambda x:
-                self.store.put("auto", value=False))
-
-        row.add_widget(yes)
-        row.add_widget(no)
-
-        layout.add_widget(row)
+        layout.add_widget(self.setting_row("Mit Arduino Daten", "arduino"))
+        layout.add_widget(self.setting_row("Mit Winkel", "winkel"))
+        layout.add_widget(self.setting_row("Automatisches Speichern", "auto"))
 
         self.add_widget(layout)
         self.add_widget(self.topbar)
