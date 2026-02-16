@@ -21,7 +21,7 @@ entrypoint = main.py
 
 # Benötigte Bibliotheken
 orientation = portrait
-requirements = python3,kivy,pyjnius,android
+requirements = python3,kivy,pyjnius,android,pillow
 android.permissions = CAMERA
 
 # Anzeige
