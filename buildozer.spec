@@ -22,14 +22,16 @@ entrypoint = main.py
 # Benötigte Bibliotheken
 orientation = portrait
 requirements = python3,kivy,pyjnius,android,pillow
-android.permissions = CAMERA
+
+android.permissions = CAMERA,BLUETOOTH_SCAN, BLUETOOTH_CONNECT, ACCESS_FINE_LOCATION
+
 
 # Anzeige
 fullscreen = 0
 
 
 # Android SDK / NDK
-android.api = 33
+android.api = 31
 android.minapi = 26
 android.sdk = 33
 android.ndk = 25b
