@@ -16,15 +16,14 @@ from kivy.clock import Clock
 from kivy.utils import platform
 
 try:
-    from android.permissions import check_permission, Permission, request_permissions
+    from android.permissions import check_permission, Permission
 except:
     check_permission = None
     Permission = None
-    request_permissions = None
 
 
 # ==========================================================
-# HAUPT LAYOUT
+# DASHBOARD
 # ==========================================================
 
 class Dashboard(FloatLayout):
@@ -45,11 +44,16 @@ class Dashboard(FloatLayout):
         Clock.schedule_once(lambda dt: self.show_camera(), 0.2)
 
     # ======================================================
-    # TOPBAR
+    # TOPBAR (immer sichtbar)
     # ======================================================
 
     def build_topbar(self):
-        self.topbar = BoxLayout(size_hint=(1, .08), pos_hint={"top": 1})
+        self.topbar = BoxLayout(
+            size_hint=(1, .08),
+            pos_hint={"top": 1},
+            spacing=5,
+            padding=5
+        )
 
         for t, f in [
             ("?", self.show_help),
@@ -68,7 +72,8 @@ class Dashboard(FloatLayout):
 
     def build_camera(self):
         self.camera = Camera(play=False, resolution=(1920, 1080))
-        self.camera.size_hint = (1, 1)
+        self.camera.size_hint = (1, .92)
+        self.camera.pos_hint = {"center_x": .5, "y": 0}
 
         with self.camera.canvas.before:
             PushMatrix()
@@ -115,9 +120,11 @@ class Dashboard(FloatLayout):
 
     def show_camera(self, *args):
         self.clear_widgets()
+        self.add_widget(self.topbar)
 
         if check_permission and not check_permission(Permission.CAMERA):
-            self.add_widget(Label(text="Kamera Berechtigung fehlt"))
+            self.add_widget(Label(text="Kamera Berechtigung fehlt",
+                                  pos_hint={"center_x": .5, "center_y": .5}))
             return
 
         self.camera.play = True
@@ -125,7 +132,7 @@ class Dashboard(FloatLayout):
         self.add_widget(self.capture)
 
     def take_photo(self, instance):
-        number = len(os.listdir(self.photos_dir)) + 1
+        number = len([f for f in os.listdir(self.photos_dir) if f.endswith(".png")]) + 1
         path = os.path.join(self.photos_dir, f"{number:04d}.png")
         self.camera.export_to_png(path)
 
@@ -138,7 +145,7 @@ class Dashboard(FloatLayout):
         self.camera.play = False
         self.add_widget(self.topbar)
 
-        scroll = ScrollView()
+        scroll = ScrollView(size_hint=(1, .92), pos_hint={"y": 0})
         grid = GridLayout(cols=3, size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
 
@@ -180,8 +187,8 @@ class Dashboard(FloatLayout):
 
         self.angle_lbl = Label(text="0°", font_size=80, size_hint_y=0.4)
         self.scan_btn = Button(text="Scan starten", size_hint_y=0.15)
-
         self.log_lbl = Label(text="Bereit\n", size_hint_y=0.45)
+
         layout.add_widget(self.angle_lbl)
         layout.add_widget(self.scan_btn)
         layout.add_widget(self.log_lbl)
@@ -194,8 +201,6 @@ class Dashboard(FloatLayout):
 
         from jnius import autoclass, PythonJavaClass, java_method
         BluetoothAdapter = autoclass("android.bluetooth.BluetoothAdapter")
-        PythonActivity = autoclass("org.kivy.android.PythonActivity")
-        mActivity = PythonActivity.mActivity
 
         adapter = BluetoothAdapter.getDefaultAdapter()
 
@@ -206,7 +211,7 @@ class Dashboard(FloatLayout):
             def onLeScan(self, device, rssi, scanRecord):
                 if device.getName() == "Arduino_GCS":
                     Clock.schedule_once(lambda dt:
-                        setattr(self.angle_lbl, "text", "Verbunden"))
+                        setattr(self.angle_lbl, "text", "Arduino gefunden"))
 
         scan_cb = ScanCallback()
 
@@ -229,6 +234,10 @@ class Dashboard(FloatLayout):
         self.add_widget(self.topbar)
         self.add_widget(Label(text="Hilfe"))
 
+
+# ==========================================================
+# APP START
+# ==========================================================
 
 class MainApp(App):
     def build(self):
