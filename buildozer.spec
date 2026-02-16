@@ -4,7 +4,7 @@
 title = Archäologie
 
 # Paketname (muss klein sein, keine Umlaute!)
-package.name = archaelogie
+package.name = archaeologie
 
 # Domain (frei wählbar)
 package.domain = org.example
@@ -31,7 +31,7 @@ fullscreen = 0
 
 
 # Android SDK / NDK
-android.api = 31
+android.api = 33
 android.minapi = 26
 android.sdk = 33
 android.ndk = 25b
