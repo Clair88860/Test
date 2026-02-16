@@ -1,4 +1,4 @@
-+import os
+import os
 import struct
 from datetime import datetime
 from kivy.app import App
