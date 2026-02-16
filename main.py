@@ -3,200 +3,150 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.image import Image
-from kivy.uix.popup import Popup
-from kivy.uix.gridlayout import GridLayout
-from kivy.uix.screenmanager import ScreenManager, Screen, SlideTransition
 from kivy.clock import Clock
-from kivy.core.window import Window
-from kivy.storage.jsonstore import JsonStore
 from kivy.utils import platform
-from jnius import autoclass
-import os
-import datetime
+import struct
 
-# Android Permissions
+# Jnius Importe (nur auf Android)
 if platform == "android":
-    from android.permissions import request_permissions, Permission
+    from jnius import autoclass, PythonJavaClass, java_method
+    BluetoothAdapter = autoclass("android.bluetooth.BluetoothAdapter")
+    BluetoothDevice = autoclass("android.bluetooth.BluetoothDevice")
+    BluetoothGattDescriptor = autoclass("android.bluetooth.BluetoothGattDescriptor")
+    UUID = autoclass("java.util.UUID")
+    PythonActivity = autoclass("org.kivy.android.PythonActivity")
+    mActivity = PythonActivity.mActivity
+else:
+    # Dummy-Klassen für PC-Tests (verhindert Absturz beim Start am PC)
+    class PythonJavaClass: pass
+    def java_method(sig): return lambda x: x
 
-# ───────────── Design ─────────────
-DARK_BLUE_BG = (0.02, 0.1, 0.3, 1)
-TEXT_COLOR = (1, 1, 1, 1)
-BUTTON_COLOR = (0.2, 0.6, 0.2, 1)
+CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
 
-# ───────────── Screens ─────────────
-class HScreen(Screen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.add_widget(Label(
-            text="Bei Problemen melden sie sich bitte unter folgender E-Mail Adresse:",
-            color=TEXT_COLOR,
-            halign="center",
-            valign="middle",
-            font_size=32
-        ))
-
-class KScreen(Screen):
-    def __init__(self, app, **kwargs):
-        super().__init__(**kwargs)
+class BLEScanCallback(PythonJavaClass):
+    __javainterfaces__ = ["android/bluetooth/BluetoothAdapter$LeScanCallback"]
+    def __init__(self, app):
+        super().__init__()
         self.app = app
-        self.layout = BoxLayout(orientation='vertical')
-        self.add_widget(self.layout)
 
-        # Kamera Bereich
-        self.camera_area = BoxLayout()
-        self.layout.add_widget(self.camera_area)
+    @java_method("(Landroid/bluetooth/BluetoothDevice;I[B)V")
+    def onLeScan(self, device, rssi, scanRecord):
+        name = device.getName()
+        if name == "Arduino_GCS":
+            self.app.log(f"Gefunden: {name}")
+            self.app.connect(device)
 
-        # Button unten auf Kamera
-        self.capture_btn = Button(
-            text="●",
-            size_hint=(None, None),
-            size=(80, 80),
-            background_normal='',
-            background_color=(1,1,1,1),
-            pos_hint={'center_x':0.5}
-        )
-        self.capture_btn.bind(on_press=self.capture)
-        self.layout.add_widget(self.capture_btn)
-
-        # Platz für Vorschau
-        self.preview = None
-
-    def capture(self, instance):
-        # Kamera aufnehmen
-        if self.app.autom_save:
-            self.app.save_photo()
-        else:
-            # Vorschau anzeigen mit Wiederholen/Speichern
-            if self.preview:
-                self.layout.remove_widget(self.preview)
-            self.preview = Image(source=self.app.take_photo(), allow_stretch=True)
-            self.layout.add_widget(self.preview, index=1)  # Über Button
-            # Buttons unter Vorschau
-            btn_layout = BoxLayout(size_hint=(1,0.1))
-            btn_repeat = Button(text="Wiederholen", on_press=lambda x:self.app.repeat_photo(self.preview))
-            btn_save = Button(text="Speichern", on_press=lambda x:self.app.save_preview(self.preview))
-            btn_layout.add_widget(btn_repeat)
-            btn_layout.add_widget(btn_save)
-            self.layout.add_widget(btn_layout)
-            self.app.current_preview_btn_layout = btn_layout
-
-class GScreen(Screen):
-    def __init__(self, app, **kwargs):
-        super().__init__(**kwargs)
+class GattCallback(PythonJavaClass):
+    __javainterfaces__ = ["android/bluetooth/BluetoothGattCallback"]
+    def __init__(self, app):
+        super().__init__()
         self.app = app
-        self.grid = GridLayout(cols=2, spacing=10, size_hint_y=None)
-        self.grid.bind(minimum_height=self.grid.setter('height'))
-        scroll = ScrollView()
-        scroll.add_widget(self.grid)
-        self.add_widget(scroll)
-        self.refresh_gallery()
 
-    def refresh_gallery(self):
-        self.grid.clear_widgets()
-        photos = sorted(self.app.photos)
-        for idx, path in enumerate(photos):
-            box = BoxLayout(orientation='vertical', size_hint_y=None, height=200)
-            thumb = Image(source=path)
-            box.add_widget(Label(text=f"{idx+1:04d}", size_hint_y=0.1))
-            box.add_widget(thumb)
-            i_btn = Button(text="i", size_hint=(0.1,0.1))
-            i_btn.bind(on_press=lambda x, p=path: self.app.open_photo_info(p))
-            box.add_widget(i_btn)
-            self.grid.add_widget(box)
+    @java_method("(Landroid/bluetooth/BluetoothGatt;II)V")
+    def onConnectionStateChange(self, gatt, status, newState):
+        if newState == 2: # STATE_CONNECTED
+            self.app.log("Verbunden! Suche Services...")
+            Clock.schedule_once(lambda dt: gatt.discoverServices(), 1.0)
+        elif newState == 0: # STATE_DISCONNECTED
+            self.app.log("Verbindung getrennt.")
 
-class EScreen(Screen):
-    def __init__(self, app, **kwargs):
-        super().__init__(**kwargs)
-        self.app = app
-        layout = BoxLayout(orientation='vertical', padding=10, spacing=10)
-        layout.add_widget(Label(text="Einstellungen", font_size=32, size_hint_y=0.1))
-        # Optionen
-        self.options = {
-            "Automatisches Speichern": "autom_save",
-            "Daten von Arduino": "arduino_data",
-            "Mit Entzerrung": "entzerrung",
-            "Mit Winkel": "winkel"
-        }
-        for key, attr in self.options.items():
-            row = BoxLayout(size_hint_y=0.1)
-            row.add_widget(Label(text=key, size_hint_x=0.6))
-            btn_yes = Button(text="Ja", background_color=BUTTON_COLOR)
-            btn_no = Button(text="Nein")
-            btn_yes.bind(on_press=lambda x, a=attr: self.app.set_option(a, True))
-            btn_no.bind(on_press=lambda x, a=attr: self.app.set_option(a, False))
-            row.add_widget(btn_yes)
-            row.add_widget(btn_no)
-            layout.add_widget(row)
-        self.add_widget(layout)
+    @java_method("(Landroid/bluetooth/BluetoothGatt;I)V")
+    def onServicesDiscovered(self, gatt, status):
+        self.app.log("Services entdeckt")
+        services = gatt.getServices()
+        for i in range(services.size()):
+            s = services.get(i)
+            s_uuid = s.getUuid().toString().lower()
+            if "180a" in s_uuid: # Beispiel Service UUID
+                chars = s.getCharacteristics()
+                for j in range(chars.size()):
+                    c = chars.get(j)
+                    if "2a57" in c.getUuid().toString().lower():
+                        gatt.setCharacteristicNotification(c, True)
+                        d = c.getDescriptor(UUID.fromString(CCCD_UUID))
+                        if d:
+                            d.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                            gatt.writeDescriptor(d)
 
-class AScreen(Screen):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        layout = BoxLayout(orientation='vertical')
-        layout.add_widget(Label(text="BLE Arduino Daten Seite", font_size=24))
-        self.add_widget(layout)
+    @java_method("(Landroid/bluetooth/BluetoothGatt;Landroid/bluetooth/BluetoothGattCharacteristic;)V")
+    def onCharacteristicChanged(self, gatt, characteristic):
+        data = characteristic.getValue()
+        if data:
+            try:
+                # Nutze 'h' für 16-bit signed oder 'i' für 32-bit
+                angle = struct.unpack('<h', bytes(data))[0]
+                Clock.schedule_once(lambda dt: self.app.update_data(angle))
+            except Exception as e:
+                self.app.log(f"Fehler: {str(e)}")
 
-# ───────────── Main App ─────────────
-class MainApp(App):
+class BLEApp(App):
     def build(self):
-        self.store = JsonStore("settings.json")
-        self.photos = []
-        self.autom_save = self.store.get('settings')['autom_save'] if self.store.exists('settings') else False
-        self.arduino_data = self.store.get('settings')['arduino_data'] if self.store.exists('settings') else False
-        self.sm = ScreenManager(transition=SlideTransition())
-        self.sm.add_widget(HScreen(name='H'))
-        self.sm.add_widget(KScreen(self, name='K'))
-        self.sm.add_widget(GScreen(self, name='G'))
-        self.sm.add_widget(EScreen(self, name='E'))
-        self.sm.add_widget(AScreen(name='A'))
-        # Immer K öffnen
-        self.sm.current = 'K'
-        return self.sm
+        self.root = BoxLayout(orientation='vertical', padding=20, spacing=10)
+        self.angle_lbl = Label(text="0°", font_size=100, size_hint_y=0.4)
+        self.status_btn = Button(text="Scan starten", size_hint_y=0.2, on_press=self.start_scan)
+        self.scroll = ScrollView(size_hint_y=0.4)
+        self.log_lbl = Label(text="Bereit\n", size_hint_y=None, halign="left", valign="top")
+        self.log_lbl.bind(texture_size=self.log_lbl.setter('size'))
+        self.scroll.add_widget(self.log_lbl)
+        self.root.add_widget(self.angle_lbl)
+        self.root.add_widget(self.status_btn)
+        self.root.add_widget(self.scroll)
+        
+        self.gatt = None
+        self.scan_cb = None
+        self.gatt_cb = None # WICHTIG: Referenz behalten!
+        return self.root
 
-    # Dummy Kamera Funktionen
-    def take_photo(self):
-        filename = f"photo_{len(self.photos)+1:04d}.png"
-        self.photos.append(filename)
-        # In echter App hier Kamera-Bild speichern
-        return filename
+    def log(self, txt):
+        Clock.schedule_once(lambda dt: setattr(self.log_lbl, 'text', self.log_lbl.text + txt + "\n"))
 
-    def save_photo(self):
-        photo = self.take_photo()
-        self.photos.append(photo)
-        self.sm.get_screen('G').refresh_gallery()
+    def on_start(self):
+        if platform == "android":
+            from android.permissions import request_permissions, Permission
+            # Alle notwendigen Berechtigungen für Android 12+
+            request_permissions([
+                Permission.ACCESS_FINE_LOCATION,
+                Permission.BLUETOOTH_SCAN,
+                Permission.BLUETOOTH_CONNECT
+            ], self.check_permissions)
 
-    def repeat_photo(self, preview):
-        # Entferne Vorschau
-        screen = self.sm.get_screen('K')
-        screen.layout.remove_widget(preview)
-        screen.layout.remove_widget(screen.app.current_preview_btn_layout)
-        screen.preview = None
-
-    def save_preview(self, preview):
-        # Speichern
-        self.photos.append(preview.source)
-        self.sm.get_screen('G').refresh_gallery()
-        self.repeat_photo(preview)
-
-    def open_photo_info(self, path):
-        # Popup mit Name editierbar, Datum/Uhrzeit, Löschen
-        box = BoxLayout(orientation='vertical')
-        lbl_name = Label(text=os.path.basename(path))
-        box.add_widget(lbl_name)
-        lbl_date = Label(text=str(datetime.datetime.now()))
-        box.add_widget(lbl_date)
-        btn_del = Button(text="Foto löschen")
-        box.add_widget(btn_del)
-        popup = Popup(title="Info", content=box, size_hint=(0.8,0.5))
-        popup.open()
-
-    def set_option(self, attr, val):
-        setattr(self, attr, val)
-        if not self.store.exists('settings'):
-            self.store.put('settings', **{attr: val})
+    def check_permissions(self, permissions, results):
+        if all(results):
+            self.log("Alle Berechtigungen erteilt.")
         else:
-            self.store.update('settings', **{attr: val})
+            self.log("Berechtigungen fehlen!")
+
+    def start_scan(self, *args):
+        try:
+            adapter = BluetoothAdapter.getDefaultAdapter()
+            if not adapter or not adapter.isEnabled():
+                self.log("Bitte Bluetooth aktivieren!")
+                return
+            
+            self.log("Scanne...")
+            self.status_btn.text = "Suche..."
+            self.scan_cb = BLEScanCallback(self)
+            adapter.startLeScan(self.scan_cb)
+        except Exception as e:
+            self.log(f"Scan Fehler: {str(e)}")
+
+    def connect(self, device):
+        adapter = BluetoothAdapter.getDefaultAdapter()
+        adapter.stopLeScan(self.scan_cb)
+        
+        self.log(f"Verbinde mit {device.getAddress()}...")
+        # Die Callback-Instanz muss an self gebunden werden, sonst löscht Python sie
+        self.gatt_cb = GattCallback(self)
+        # TRANSPORT_LE = 2
+        self.gatt = device.connectGatt(mActivity, False, self.gatt_cb, 2)
+
+    def update_data(self, angle):
+        self.angle_lbl.text = f"{angle}°"
+        self.status_btn.text = "Daten empfangen"
+
+    def on_stop(self):
+        if self.gatt:
+            self.gatt.close()
 
 if __name__ == "__main__":
-    MainApp().run()
+    BLEApp().run()
