@@ -34,7 +34,7 @@ else:
 
 CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
 
-# ===== BLE Callbacks (nur Android) =====
+# ===== BLE Callbacks =====
 if IS_ANDROID:
     class BLEScanCallback(PythonJavaClass):
         __javainterfaces__ = ["android/bluetooth/BluetoothAdapter$LeScanCallback"]
@@ -114,7 +114,7 @@ class MainApp(App):
         self.scan_cb = None
         self.gatt_cb = None
 
-        # Startseite Kamera, nicht A-Seite
+        # Startseite Kamera
         self.show_camera()
 
         # Update jede Sekunde
@@ -200,22 +200,28 @@ class MainApp(App):
         scroll = ScrollView()
         grid = GridLayout(cols=2, spacing=10, padding=10, size_hint_y=None)
         grid.bind(minimum_height=grid.setter('height'))
+
         files = sorted([f for f in os.listdir(self.user_data_dir) if f.endswith(".png")])
         for file in files:
-            layout = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(200))
-            lbl = Label(text=file.replace(".png",""), size_hint_y=0.2)
+            layout = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(400))
+            lbl = Label(text=file.replace(".png",""), size_hint_y=None, height=dp(30))
             layout.add_widget(lbl)
-            img = Image(source=os.path.join(self.user_data_dir,file))
-            img.bind(on_touch_down=lambda inst,touch,f=file: self.open_image(f) if inst.collide_point(*touch.pos) else None)
+            img = Image(source=os.path.join(self.user_data_dir, file))
+            img.size_hint_y = None
+            img.height = dp(350)
+            img.allow_stretch = True
+            img.keep_ratio = True
+            img.bind(on_touch_down=lambda inst, touch, f=file: self.open_image(f) if inst.collide_point(*touch.pos) else None)
             layout.add_widget(img)
             grid.add_widget(layout)
+
         scroll.add_widget(grid)
         self.content.add_widget(scroll)
 
     def open_image(self, filename):
         self.content.clear_widgets()
         layout = BoxLayout(orientation="vertical")
-        img_layout = FloatLayout(size_hint_y=.8)
+        img_layout = FloatLayout(size_hint_y=0.8)
         img_path = os.path.join(self.user_data_dir, filename)
         img = Image(source=img_path)
         img_layout.add_widget(img)
@@ -227,15 +233,17 @@ class MainApp(App):
         name_lbl = Label(text=filename.replace(".png",""))
         info_btn = Button(text="i", size_hint=(None,None), size=(dp(40),dp(40)))
         info_btn.bind(on_press=lambda x: self.show_info(filename))
-        bottom.add_widget(name_lbl); bottom.add_widget(info_btn)
+        bottom.add_widget(name_lbl)
+        bottom.add_widget(info_btn)
         layout.add_widget(bottom)
         self.content.add_widget(layout)
 
     def show_info(self, filename):
         path = os.path.join(self.user_data_dir, filename)
         box = BoxLayout(orientation="vertical", spacing=10)
+        box.add_widget(Label(text=f"Name:"))
         name_input = TextInput(text=filename.replace(".png",""), multiline=False)
-        box.add_widget(Label(text=f"Name:")); box.add_widget(name_input)
+        box.add_widget(name_input)
         box.add_widget(Label(text=f"Datum/Uhrzeit: {datetime.fromtimestamp(os.path.getmtime(path))}"))
         save_btn = Button(text="Name speichern")
         save_btn.bind(on_press=lambda x: self.rename_file(filename, name_input.text))
@@ -243,7 +251,7 @@ class MainApp(App):
         delete_btn = Button(text="Foto löschen")
         delete_btn.bind(on_press=lambda x: self.confirm_delete(filename))
         box.add_widget(delete_btn)
-        popup = Popup(title="Info", content=box, size_hint=(0.8,0.7))
+        popup = Popup(title=f"Info {filename}", content=box, size_hint=(0.8,0.7))
         popup.open()
 
     def rename_file(self, old_name, new_name):
