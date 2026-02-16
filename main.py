@@ -1,4 +1,4 @@
-import os, struct
+import os
 from datetime import datetime
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
@@ -14,143 +14,73 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
 from kivy.clock import Clock
 from kivy.metrics import dp
-from kivy.graphics import PushMatrix, PopMatrix, Rotate
+from kivy.graphics import PushMatrix, PopMatrix, Rotate, Color, Ellipse
 from kivy.utils import platform
 
 IS_ANDROID = platform == "android"
-if IS_ANDROID:
-    from jnius import autoclass, PythonJavaClass, java_method
-    from android.permissions import request_permissions, Permission
-    BluetoothAdapter = autoclass("android.bluetooth.BluetoothAdapter")
-    BluetoothGattDescriptor = autoclass("android.bluetooth.BluetoothGattDescriptor")
-    UUID = autoclass("java.util.UUID")
-    PythonActivity = autoclass("org.kivy.android.PythonActivity")
-    mActivity = PythonActivity.mActivity
-else:
-    class PythonJavaClass: pass
-    def java_method(sig): return lambda x: x
-
-CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
-
-if IS_ANDROID:
-    class BLEScanCallback(PythonJavaClass):
-        __javainterfaces__ = ["android/bluetooth/BluetoothAdapter$LeScanCallback"]
-        def __init__(self, app): super().__init__(); self.app = app
-        @java_method("(Landroid/bluetooth/BluetoothDevice;I[B)V")
-        def onLeScan(self, device, rssi, scanRecord):
-            if device.getName() == "Arduino_GCS":
-                self.app.connect(device)
-
-    class GattCallback(PythonJavaClass):
-        __javainterfaces__ = ["android/bluetooth/BluetoothGattCallback"]
-        def __init__(self, app): super().__init__(); self.app = app
-        @java_method("(Landroid/bluetooth/BluetoothGatt;II)V")
-        def onConnectionStateChange(self, gatt, status, newState):
-            if newState == 2:
-                Clock.schedule_once(lambda dt: gatt.discoverServices(),1)
-                self.app.ble_status = "Verbunden! Suche Services..."
-            elif newState == 0:
-                self.app.ble_status = "Verbindung getrennt."
-        @java_method("(Landroid/bluetooth/BluetoothGatt;I)V")
-        def onServicesDiscovered(self, gatt, status):
-            self.app.ble_status = "Services entdeckt"
-            services = gatt.getServices()
-            for i in range(services.size()):
-                s = services.get(i)
-                if "180a" in s.getUuid().toString().lower():
-                    chars = s.getCharacteristics()
-                    for j in range(chars.size()):
-                        c = chars.get(j)
-                        if "2a57" in c.getUuid().toString().lower():
-                            gatt.setCharacteristicNotification(c, True)
-                            d = c.getDescriptor(UUID.fromString(CCCD_UUID))
-                            if d:
-                                d.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-                                gatt.writeDescriptor(d)
-        @java_method("(Landroid/bluetooth/BluetoothGatt;Landroid/bluetooth/BluetoothGattCharacteristic;)V")
-        def onCharacteristicChanged(self, gatt, characteristic):
-            data = characteristic.getValue()
-            if data:
-                try:
-                    angle = struct.unpack('<h', bytes(data))[0]
-                    Clock.schedule_once(lambda dt: self.app.update_angle(angle))
-                except: pass
 
 class MainApp(App):
     def build(self):
+        # User-Data-Verzeichnis für Fotos
         self.user_data_dir = App.get_running_app().user_data_dir or os.getcwd()
         os.makedirs(self.user_data_dir, exist_ok=True)
 
         self.root = BoxLayout(orientation="vertical")
-        # Dashboard
+
+        # ---------------- Dashboard ----------------
         self.dashboard = BoxLayout(size_hint_y=0.1)
         self.btn_camera = Button(text="K"); self.btn_camera.bind(on_press=self.show_camera)
         self.btn_gallery = Button(text="G"); self.btn_gallery.bind(on_press=self.show_gallery)
         self.btn_e = Button(text="E"); self.btn_e.bind(on_press=self.show_e)
         self.btn_a = Button(text="A"); self.btn_a.bind(on_press=self.show_a)
-        self.ble_display = Label(text="", size_hint_x=0.4)
-        for b in [self.btn_camera,self.btn_gallery,self.btn_e,self.btn_a]:
+        for b in [self.btn_camera, self.btn_gallery, self.btn_e, self.btn_a]:
             self.dashboard.add_widget(b)
-        self.dashboard.add_widget(self.ble_display)
         self.root.add_widget(self.dashboard)
 
+        # ---------------- Content ----------------
         self.content = BoxLayout()
         self.root.add_widget(self.content)
 
+        # E-Seite Einstellungen
         self.arduino_enabled = False
-        self.angle = 0
-        self.direction = "--"
-        self.ble_status = "Nicht verbunden"
+        self.auto_save = False
+        self.winkel_enabled = False
+        self.zentrierung_enabled = False
 
-        self.gatt = None
-        self.scan_cb = None
-        self.gatt_cb = None
+        # Kamera-Variable
+        self.camera = None
+        self.capture_btn = None
+        self.rot = None
 
-        # Update BLE-Anzeige jede Sekunde
-        Clock.schedule_interval(lambda dt: self.update_dashboard(), 1)
-
-        # Berechtigungen Kamera
+        # Kamera-Berechtigungen
         if IS_ANDROID:
+            from android.permissions import request_permissions, Permission
             request_permissions([Permission.CAMERA], self.permissions_callback)
         else:
-            Clock.schedule_once(lambda dt: self.show_camera(),0.1)
+            Clock.schedule_once(lambda dt: self.show_camera(), 0.1)
 
         return self.root
 
     def permissions_callback(self, permissions, results):
         if all(results):
-            Clock.schedule_once(lambda dt: self.show_camera(),0.1)
+            Clock.schedule_once(lambda dt: self.show_camera(), 0.1)
         else:
             self.content.clear_widgets()
             self.content.add_widget(Label(text="Keine Kameraberechtigung!"))
 
-    def update_angle(self, angle):
-        self.angle = angle
-        self.direction = self.calc_direction(angle)
-
-    def calc_direction(self, angle):
-        a = angle % 360
-        if a>=337 or a<22: return "Nord"
-        if a<67: return "Nordost"
-        if a<112: return "Ost"
-        if a<157: return "Südost"
-        if a<202: return "Süd"
-        if a<247: return "Südwest"
-        if a<292: return "West"
-        return "Nordwest"
-
+    # ---------------- Dashboard-Aktualisierung ----------------
     def update_dashboard(self):
-        if self.arduino_enabled:
-            self.ble_display.text = f"{self.angle}° | {self.direction} | {self.ble_status}"
-        else:
-            self.ble_display.text = ""
+        # Nur nötig für spätere Erweiterung (BLE/Nordrichtung)
+        pass
 
-    # ===== Kamera =====
-    def show_camera(self,*args):
+    # ---------------- Kamera ----------------
+    def show_camera(self, *args):
         self.content.clear_widgets()
-        layout = BoxLayout(orientation="vertical")
+        layout = FloatLayout()
+
+        # Kamera
         try:
-            self.camera = Camera(play=True)
+            self.camera = Camera(play=True, resolution=(1920,1080))
             with self.camera.canvas.before:
                 PushMatrix()
                 self.rot = Rotate(angle=-90, origin=self.camera.center)
@@ -158,20 +88,34 @@ class MainApp(App):
                 PopMatrix()
             self.camera.bind(pos=self.update_rot, size=self.update_rot)
             layout.add_widget(self.camera)
-            btn = Button(text="Foto aufnehmen",size_hint_y=0.15)
-            btn.bind(on_press=self.take_photo)
-            layout.add_widget(btn)
         except Exception as e:
             layout.add_widget(Label(text=f"Kamera konnte nicht gestartet werden:\n{e}"))
+
+        # Runder Aufnahme-Button
+        self.capture_btn = Button(size_hint=(None,None), size=(dp(90), dp(90)),
+                                  background_normal="", background_color=(1,1,1,1),
+                                  pos_hint={"center_x":0.5,"y":0.02})
+        with self.capture_btn.canvas.before:
+            Color(1,1,1,1)
+            self.circle = Ellipse(size=self.capture_btn.size, pos=self.capture_btn.pos)
+        self.capture_btn.bind(pos=self.update_circle, size=self.update_circle)
+        self.capture_btn.bind(on_press=self.take_photo)
+        layout.add_widget(self.capture_btn)
+
         self.content.add_widget(layout)
 
-    def update_rot(self,*args):
-        if hasattr(self,'rot'):
+    def update_rot(self, *args):
+        if self.rot:
             self.rot.origin = self.camera.center
+
+    def update_circle(self, *args):
+        if self.circle and self.capture_btn:
+            self.circle.pos = self.capture_btn.pos
+            self.circle.size = self.capture_btn.size
 
     def take_photo(self, instance):
         files = sorted([f for f in os.listdir(self.user_data_dir) if f.endswith(".png")])
-        number = len(files) + 1
+        number = len(files)+1
         filename = f"{number:04d}.png"
         path = os.path.join(self.user_data_dir, filename)
         self.camera.export_to_png(path)
@@ -190,18 +134,21 @@ class MainApp(App):
         layout.add_widget(btns)
         self.content.add_widget(layout)
 
-    # ===== Galerie =====
-    def show_gallery(self,*args):
+    # ---------------- Galerie ----------------
+    def show_gallery(self, *args):
         self.content.clear_widgets()
         scroll = ScrollView()
         grid = GridLayout(cols=2, spacing=10, padding=10, size_hint_y=None)
-        grid.bind(minimum_height=grid.setter('height'))
+        grid.bind(minimum_height=grid.setter("height"))
+
         files = sorted([f for f in os.listdir(self.user_data_dir) if f.endswith(".png")])
         for file in files:
             layout = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(400))
             lbl = Label(text=file.replace(".png",""), size_hint_y=None, height=dp(30))
             layout.add_widget(lbl)
-            img = Image(source=os.path.join(self.user_data_dir, file), size_hint_y=None, height=dp(350), allow_stretch=True, keep_ratio=True)
+            img = Image(source=os.path.join(self.user_data_dir, file),
+                        size_hint_y=None, height=dp(350),
+                        allow_stretch=True, keep_ratio=True)
             img.bind(on_touch_down=lambda inst, touch, f=file: self.open_image(f) if inst.collide_point(*touch.pos) else None)
             layout.add_widget(img)
             grid.add_widget(layout)
@@ -215,9 +162,6 @@ class MainApp(App):
         img_path = os.path.join(self.user_data_dir, filename)
         img = Image(source=img_path)
         img_layout.add_widget(img)
-        if self.arduino_enabled:
-            lbl = Label(text="Norden", color=(1,1,1,1), size_hint=(None,None), pos=(dp(10), dp(10)))
-            img_layout.add_widget(lbl)
         layout.add_widget(img_layout)
         bottom = BoxLayout(size_hint_y=0.15)
         name_lbl = Label(text=filename.replace(".png",""))
@@ -260,63 +204,43 @@ class MainApp(App):
         popup = Popup(title="Sicher?", content=box, size_hint=(0.7,0.4))
         popup.open()
 
-    # ===== A-Seite =====
+    # ---------------- A-Seite ----------------
     def show_a(self,*args):
         self.content.clear_widgets()
         vbox = BoxLayout(orientation="vertical")
         if self.arduino_enabled:
-            self.arduino_label = Label(text=f"Winkel: {self.angle}° | Richtung: {self.direction} | {self.ble_status}", size_hint_y=None,height=40)
-            vbox.add_widget(self.arduino_label)
-            if IS_ANDROID:
-                scan_btn = Button(text="Scan starten")
-                scan_btn.bind(on_press=self.start_scan)
-                vbox.add_widget(scan_btn)
+            vbox.add_widget(Label(text="Winkel/Nordrichtung wird hier angezeigt"))
         else:
             vbox.add_widget(Label(text="Sie müssen die Daten erst in den Einstellungen aktivieren"))
         self.content.add_widget(vbox)
 
-    def start_scan(self, *args):
-        if not IS_ANDROID: return
-        try:
-            adapter = BluetoothAdapter.getDefaultAdapter()
-            if not adapter or not adapter.isEnabled():
-                self.ble_status = "Bitte Bluetooth aktivieren!"
-                return
-            self.ble_status = "Scanne..."
-            self.scan_cb = BLEScanCallback(self)
-            adapter.startLeScan(self.scan_cb)
-        except Exception as e:
-            self.ble_status = f"Scan Fehler: {str(e)}"
-
-    def connect(self, device):
-        adapter = BluetoothAdapter.getDefaultAdapter()
-        adapter.stopLeScan(self.scan_cb)
-        self.ble_status = f"Verbinde mit {device.getAddress()}..."
-        self.gatt_cb = GattCallback(self)
-        self.gatt = device.connectGatt(mActivity, False, self.gatt_cb, 2)
-
-    # ===== E-Seite =====
+    # ---------------- E-Seite ----------------
     def show_e(self,*args):
         self.content.clear_widgets()
         vbox = BoxLayout(orientation="vertical", padding=10, spacing=10)
+        # Arduino aktiviert
         h1 = BoxLayout()
         h1.add_widget(Label(text="Mit Arduino"))
-        ja = ToggleButton(text="Ja", group="arduino"); nein = ToggleButton(text="Nein", group="arduino", state="down")
+        ja = ToggleButton(text="Ja", group="arduino")
+        nein = ToggleButton(text="Nein", group="arduino", state="down")
         ja.bind(on_press=lambda x: setattr(self,'arduino_enabled', True))
         nein.bind(on_press=lambda x: setattr(self,'arduino_enabled', False))
         h1.add_widget(ja); h1.add_widget(nein)
         vbox.add_widget(h1)
         # Zentrierung
         h2 = BoxLayout(); h2.add_widget(Label(text="Zentrierung"))
-        h2.add_widget(ToggleButton(text="Ja", group="zent")); h2.add_widget(ToggleButton(text="Nein", group="zent", state="down"))
+        h2.add_widget(ToggleButton(text="Ja", group="zent"))
+        h2.add_widget(ToggleButton(text="Nein", group="zent", state="down"))
         vbox.add_widget(h2)
         # Automatisches Speichern
         h3 = BoxLayout(); h3.add_widget(Label(text="Automatisches Speichern"))
-        h3.add_widget(ToggleButton(text="Ja", group="auto")); h3.add_widget(ToggleButton(text="Nein", group="auto", state="down"))
+        h3.add_widget(ToggleButton(text="Ja", group="auto"))
+        h3.add_widget(ToggleButton(text="Nein", group="auto", state="down"))
         vbox.add_widget(h3)
         # Mit Winkel
         h4 = BoxLayout(); h4.add_widget(Label(text="Mit Winkel"))
-        h4.add_widget(ToggleButton(text="Ja", group="winkel")); h4.add_widget(ToggleButton(text="Nein", group="winkel", state="down"))
+        h4.add_widget(ToggleButton(text="Ja", group="winkel"))
+        h4.add_widget(ToggleButton(text="Nein", group="winkel", state="down"))
         vbox.add_widget(h4)
         self.content.add_widget(vbox)
 
