@@ -6,7 +6,6 @@ from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
 from kivy.uix.label import Label
 from kivy.uix.image import Image
-from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.popup import Popup
@@ -20,33 +19,32 @@ from kivy.utils import platform
 class MainApp(App):
 
     def build(self):
+        # Hauptlayout: vertikal
         self.root = BoxLayout(orientation="vertical")
 
-        # Dashboard oben
+        # Dashboard oben – immer sichtbar
         self.topbar = Label(
             text="Winkel: --° | Richtung: --",
             size_hint_y=0.1,
             font_size=22
         )
-
-        self.content = BoxLayout()
         self.root.add_widget(self.topbar)
+
+        # Content Bereich (dynamisch)
+        self.content = BoxLayout()
         self.root.add_widget(self.content)
 
         self.arduino_enabled = False
 
+        # Startseite = Kamera
         self.show_camera()
         return self.root
 
-    # ======================================================
-    # =================== KAMERA ===========================
-    # ======================================================
-
+    # ====================== KAMERA ===========================
     def show_camera(self):
         self.content.clear_widgets()
 
         layout = BoxLayout(orientation="vertical")
-
         self.camera = Camera(play=True)
         layout.add_widget(self.camera)
 
@@ -61,7 +59,6 @@ class MainApp(App):
         number = len(files) + 1
         filename = f"{number:04d}.png"
         path = os.path.join(self.user_data_dir, filename)
-
         self.camera.export_to_png(path)
         self.show_preview(path)
 
@@ -73,7 +70,6 @@ class MainApp(App):
         layout.add_widget(img)
 
         btns = BoxLayout(size_hint_y=0.2)
-
         save = Button(text="Speichern")
         repeat = Button(text="Wiederholen")
 
@@ -82,45 +78,37 @@ class MainApp(App):
 
         btns.add_widget(save)
         btns.add_widget(repeat)
-
         layout.add_widget(btns)
         self.content.add_widget(layout)
 
-    # ======================================================
-    # =================== GALERIE ==========================
-    # ======================================================
-
+    # ====================== GALERIE ==========================
     def show_gallery(self):
         self.content.clear_widgets()
-
         scroll = ScrollView()
-        grid = GridLayout(cols=2, spacing=10, size_hint_y=None)
+        grid = BoxLayout(orientation="vertical", size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
 
         files = sorted([f for f in os.listdir(self.user_data_dir) if f.endswith(".png")])
 
         for f in files:
+            box = BoxLayout(orientation="vertical", size_hint_y=None, height=500)
+            lbl = Label(text=f)
             img = Image(source=os.path.join(self.user_data_dir, f))
-            img.size_hint_y = None
-            img.height = 500
             img.bind(on_touch_down=lambda inst, touch, file=f:
                      self.open_single_view(file) if inst.collide_point(*touch.pos) else None)
-            grid.add_widget(img)
+            box.add_widget(lbl)
+            box.add_widget(img)
+            grid.add_widget(box)
 
         scroll.add_widget(grid)
         self.content.add_widget(scroll)
 
-    # ======================================================
-    # ================= EINZELANSICHT ======================
-    # ======================================================
-
+    # ================= EINZELANSICHT =========================
     def open_single_view(self, filename):
         self.content.clear_widgets()
-
         path = os.path.join(self.user_data_dir, filename)
         layout = BoxLayout(orientation="vertical")
 
-        # Bild mit Overlay
         float_layout = FloatLayout()
         img = Image(source=path)
         float_layout.add_widget(img)
@@ -138,65 +126,42 @@ class MainApp(App):
 
         # Name + i Button
         name_row = BoxLayout(size_hint_y=0.15)
-
         name_label = Label(text=filename.replace(".png",""))
         info_btn = Button(text="i", size_hint_x=0.2)
-
         info_btn.bind(on_press=lambda x: self.open_info_popup(filename))
-
         name_row.add_widget(name_label)
         name_row.add_widget(info_btn)
 
         layout.add_widget(name_row)
         self.content.add_widget(layout)
 
-    # ======================================================
     # ================= INFO POPUP =========================
-    # ======================================================
-
     def open_info_popup(self, filename):
         path = os.path.join(self.user_data_dir, filename)
         box = BoxLayout(orientation="vertical", spacing=10, padding=10)
 
-        # Umbenennen
         name_input = TextInput(text=filename.replace(".png",""), multiline=False)
-
-        def save_name(instance):
-            new_name = name_input.text + ".png"
-            new_path = os.path.join(self.user_data_dir, new_name)
-            os.rename(path, new_path)
-            popup.dismiss()
-            self.show_gallery()
-
         box.add_widget(Label(text="Name (bearbeiten):"))
         box.add_widget(name_input)
 
-        # Datum
         timestamp = os.path.getmtime(path)
         date = datetime.fromtimestamp(timestamp).strftime("%d.%m.%Y %H:%M")
-
         box.add_widget(Label(text=f"Datum: {date}"))
 
-        # Löschen
         def confirm_delete(instance):
             confirm_box = BoxLayout(orientation="vertical")
             confirm_box.add_widget(Label(text="Wirklich löschen?"))
-
             yes = Button(text="Ja")
             no = Button(text="Nein")
-
             def delete_now(x):
                 os.remove(path)
                 confirm_popup.dismiss()
                 popup.dismiss()
                 self.show_gallery()
-
             yes.bind(on_press=delete_now)
             no.bind(on_press=lambda x: confirm_popup.dismiss())
-
             confirm_box.add_widget(yes)
             confirm_box.add_widget(no)
-
             confirm_popup = Popup(title="Sicherheitsabfrage",
                                   content=confirm_box,
                                   size_hint=(0.7,0.4))
@@ -207,40 +172,32 @@ class MainApp(App):
         box.add_widget(delete_btn)
 
         save_btn = Button(text="Speichern")
-        save_btn.bind(on_press=save_name)
+        save_btn.bind(on_press=lambda x: self.save_name(filename, name_input.text))
         box.add_widget(save_btn)
 
-        popup = Popup(title="Info",
-                      content=box,
-                      size_hint=(0.8,0.8))
+        popup = Popup(title="Info", content=box, size_hint=(0.8,0.8))
         popup.open()
 
-    # ======================================================
-    # =================== E SEITE ==========================
-    # ======================================================
+    def save_name(self, old_name, new_name):
+        old_path = os.path.join(self.user_data_dir, old_name)
+        new_path = os.path.join(self.user_data_dir, new_name + ".png")
+        os.rename(old_path, new_path)
+        self.show_gallery()
 
+    # =================== E SEITE ==========================
     def show_e(self):
         self.content.clear_widgets()
         layout = BoxLayout(orientation="vertical", spacing=20, padding=20)
-
         row = BoxLayout()
         row.add_widget(Label(text="Mit Arduino"))
-
         ja = ToggleButton(text="Ja", group="arduino")
         nein = ToggleButton(text="Nein", group="arduino", state="down")
-
         def toggle(btn):
-            if btn.state == "down" and btn.text == "Ja":
-                self.arduino_enabled = True
-            elif btn.state == "down" and btn.text == "Nein":
-                self.arduino_enabled = False
-
+            self.arduino_enabled = (btn.text=="Ja" and btn.state=="down")
         ja.bind(on_press=toggle)
         nein.bind(on_press=toggle)
-
         row.add_widget(ja)
         row.add_widget(nein)
-
         layout.add_widget(row)
         self.content.add_widget(layout)
 
