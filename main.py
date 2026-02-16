@@ -9,6 +9,7 @@ from kivy.uix.button import Button
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.camera import Camera
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.image import Image
 from kivy.uix.textinput import TextInput
 from kivy.uix.popup import Popup
@@ -142,7 +143,6 @@ class MainApp(App):
     def show_camera(self,*args):
         self.content.clear_widgets()
         layout = BoxLayout(orientation="vertical")
-
         self.camera = Camera(play=True)
         layout.add_widget(self.camera)
 
@@ -174,15 +174,92 @@ class MainApp(App):
         layout.add_widget(btns)
         self.content.add_widget(layout)
 
-    # ===== Galerie (Demo) =====
+    # ===== Galerie =====
     def show_gallery(self,*args):
         self.content.clear_widgets()
         scroll = ScrollView()
-        grid = BoxLayout(orientation="vertical")
-        lbl = Label(text="Galerie (Demo)")
-        grid.add_widget(lbl)
+        grid = GridLayout(cols=2, spacing=10, padding=10, size_hint_y=None)
+        grid.bind(minimum_height=grid.setter('height'))
+
+        files = sorted([f for f in os.listdir(self.user_data_dir) if f.endswith(".png")])
+
+        for file in files:
+            layout = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(200))
+            lbl = Label(text=file.replace(".png",""), size_hint_y=0.2)
+            layout.add_widget(lbl)
+
+            img = Image(source=os.path.join(self.user_data_dir,file))
+            img.bind(on_touch_down=lambda inst, touch, f=file: self.open_image(f) if inst.collide_point(*touch.pos) else None)
+            layout.add_widget(img)
+            grid.add_widget(layout)
+
         scroll.add_widget(grid)
         self.content.add_widget(scroll)
+
+    # ===== Einzelbild =====
+    def open_image(self, filename):
+        self.content.clear_widgets()
+        layout = BoxLayout(orientation="vertical")
+        img_layout = FloatLayout(size_hint_y=.8)
+        img_path = os.path.join(self.user_data_dir, filename)
+        img = Image(source=img_path)
+        img_layout.add_widget(img)
+        # Overlay Norden wenn Arduino aktiviert
+        if self.arduino_enabled:
+            lbl = Label(text="Norden", color=(1,1,1,1), size_hint=(None,None), pos=(dp(10), dp(10)))
+            img_layout.add_widget(lbl)
+        layout.add_widget(img_layout)
+
+        # Unter dem Bild: Name + i-Button
+        bottom = BoxLayout(size_hint_y=0.15)
+        name_lbl = Label(text=filename.replace(".png",""))
+        info_btn = Button(text="i", size_hint=(None,None), size=(dp(40),dp(40)))
+        info_btn.bind(on_press=lambda x: self.show_info(filename))
+        bottom.add_widget(name_lbl)
+        bottom.add_widget(info_btn)
+        layout.add_widget(bottom)
+        self.content.add_widget(layout)
+
+    # ===== Info Popup für Einzelbild =====
+    def show_info(self, filename):
+        path = os.path.join(self.user_data_dir, filename)
+        box = BoxLayout(orientation="vertical", spacing=10)
+        name_input = TextInput(text=filename.replace(".png",""), multiline=False)
+        box.add_widget(Label(text=f"Name:")); box.add_widget(name_input)
+        box.add_widget(Label(text=f"Datum/Uhrzeit: {datetime.fromtimestamp(os.path.getmtime(path))}"))
+
+        save_btn = Button(text="Name speichern")
+        save_btn.bind(on_press=lambda x: self.rename_file(filename, name_input.text))
+        box.add_widget(save_btn)
+
+        delete_btn = Button(text="Foto löschen")
+        delete_btn.bind(on_press=lambda x: self.confirm_delete(filename))
+        box.add_widget(delete_btn)
+
+        popup = Popup(title="Info", content=box, size_hint=(0.8,0.7))
+        popup.open()
+
+    def rename_file(self, old_name, new_name):
+        old_path = os.path.join(self.user_data_dir, old_name)
+        new_path = os.path.join(self.user_data_dir, f"{new_name}.png")
+        os.rename(old_path, new_path)
+        self.show_gallery()
+
+    def confirm_delete(self, filename):
+        path = os.path.join(self.user_data_dir, filename)
+        box = BoxLayout(orientation="vertical")
+        box.add_widget(Label(text="Wirklich löschen?"))
+        yes = Button(text="Ja"); no = Button(text="Nein")
+        yes.bind(on_press=lambda x: self.delete_file(path))
+        no.bind(on_press=lambda x: self.show_gallery())
+        box.add_widget(yes)
+        box.add_widget(no)
+        popup = Popup(title="Sicher?", content=box, size_hint=(0.7,0.4))
+        popup.open()
+
+    def delete_file(self, path):
+        os.remove(path)
+        self.show_gallery()
 
     # ===== A-Seite: Arduino Daten =====
     def show_a(self,*args):
@@ -192,7 +269,7 @@ class MainApp(App):
         vbox.add_widget(self.arduino_label)
         self.content.add_widget(vbox)
 
-    # ===== E-Seite: Einstellungen mit farbigen Ja/Nein =====
+    # ===== E-Seite: Einstellungen =====
     def show_e(self,*args):
         self.content.clear_widgets()
         vbox = BoxLayout(orientation="vertical", padding=10, spacing=10)
