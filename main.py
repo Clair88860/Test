@@ -1,30 +1,65 @@
 import os
 import datetime
+
 from kivy.app import App
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.gridlayout import GridLayout
-from kivy.uix.scrollview import ScrollView
-from kivy.uix.image import Image
 from kivy.uix.button import Button
 from kivy.uix.label import Label
-from kivy.uix.popup import Popup
-from kivy.uix.textinput import TextInput
 from kivy.uix.camera import Camera
 from kivy.storage.jsonstore import JsonStore
-from kivy.graphics import Color, Ellipse, PushMatrix, PopMatrix, Rotate
-from kivy.metrics import dp
 from kivy.clock import Clock
+from kivy.metrics import dp
 
+# ANDROID BLE
 from jnius import autoclass, PythonJavaClass, java_method
+from android import activity
 
 BluetoothAdapter = autoclass('android.bluetooth.BluetoothAdapter')
-BluetoothDevice = autoclass('android.bluetooth.BluetoothDevice')
+BluetoothGattCallback = autoclass('android.bluetooth.BluetoothGattCallback')
 UUID = autoclass('java.util.UUID')
 
 SERVICE_UUID = UUID.fromString("0000ffe0-0000-1000-8000-00805f9b34fb")
 CHAR_UUID = UUID.fromString("0000ffe1-0000-1000-8000-00805f9b34fb")
 
+
+# =========================================================
+# BLE CALLBACK KLASSE (WICHTIG)
+# =========================================================
+
+class GattCallback(PythonJavaClass):
+    __javainterfaces__ = ['android/bluetooth/BluetoothGattCallback']
+    __javacontext__ = 'app'
+
+    def __init__(self, app):
+        super().__init__()
+        self.app = app
+
+    @java_method('(Landroid/bluetooth/BluetoothGatt;II)V')
+    def onConnectionStateChange(self, gatt, status, newState):
+        if newState == 2:  # connected
+            self.app.arduino_connected = True
+            gatt.discoverServices()
+
+    @java_method('(Landroid/bluetooth/BluetoothGatt;I)V')
+    def onServicesDiscovered(self, gatt, status):
+        service = gatt.getService(SERVICE_UUID)
+        if service:
+            char = service.getCharacteristic(CHAR_UUID)
+            gatt.setCharacteristicNotification(char, True)
+
+    @java_method('(Landroid/bluetooth/BluetoothGatt;Landroid/bluetooth/BluetoothGattCharacteristic;)V')
+    def onCharacteristicChanged(self, gatt, characteristic):
+        try:
+            value = characteristic.getValue().decode("utf-8")
+            self.app.update_north(value)
+        except:
+            pass
+
+
+# =========================================================
+# HAUPT APP
+# =========================================================
 
 class Dashboard(FloatLayout):
 
@@ -32,90 +67,89 @@ class Dashboard(FloatLayout):
         super().__init__(**kwargs)
 
         self.store = JsonStore("settings.json")
-        self.nord_value = 0
-        self.arduino_connected = False
         self.bluetoothAdapter = BluetoothAdapter.getDefaultAdapter()
-        self.bluetoothGatt = None
-
-        app = App.get_running_app()
-        self.photos_dir = os.path.join(app.user_data_dir, "photos")
-        os.makedirs(self.photos_dir, exist_ok=True)
+        self.gatt = None
+        self.arduino_connected = False
+        self.north_value = "--"
 
         self.build_topbar()
         self.build_camera()
-        self.build_capture_button()
-
-        Clock.schedule_once(lambda dt: self.show_camera(), 0.2)
 
     # =====================================================
-    # BLE SCAN
-    # =====================================================
-
-    def scan_ble(self):
-        if not self.bluetoothAdapter:
-            self.status_label.text = "Bluetooth nicht verfügbar"
-            return
-
-        devices = self.bluetoothAdapter.getBondedDevices().toArray()
-
-        for device in devices:
-            if "Arduino" in device.getName():
-                self.status_label.text = "Arduino gefunden"
-                self.connect_ble(device)
-                return
-
-        self.status_label.text = "Kein Arduino gefunden"
-
-    def connect_ble(self, device):
-        self.status_label.text = "Verbinde..."
-        self.bluetoothGatt = device.connectGatt(None, False, self)
-
-    # =====================================================
-    # GATT CALLBACKS
-    # =====================================================
-
-    def onConnectionStateChange(self, gatt, status, newState):
-        if newState == 2:  # connected
-            self.arduino_connected = True
-            gatt.discoverServices()
-
-    def onServicesDiscovered(self, gatt, status):
-        service = gatt.getService(SERVICE_UUID)
-        if service:
-            characteristic = service.getCharacteristic(CHAR_UUID)
-            gatt.setCharacteristicNotification(characteristic, True)
-
-    def onCharacteristicChanged(self, gatt, characteristic):
-        value = characteristic.getValue().decode("utf-8")
-        try:
-            self.nord_value = int(value)
-            if hasattr(self, "nord_label"):
-                self.nord_label.text = f"Norden: {self.nord_value}°"
-        except:
-            pass
-
-    # =====================================================
-    # REST DEINER APP (gekürzt hier für Übersicht)
+    # UI
     # =====================================================
 
     def build_topbar(self):
         self.topbar = BoxLayout(size_hint=(1,.08),
                                 pos_hint={"top":1})
-        for t,f in [("K",self.show_camera),
-                    ("G",self.show_gallery),
-                    ("E",self.show_settings),
-                    ("A",self.show_a),
-                    ("H",self.show_help)]:
-            b = Button(text=t)
-            b.bind(on_press=f)
+
+        for text,func in [("K",self.show_camera),
+                          ("G",self.show_gallery),
+                          ("E",self.show_settings),
+                          ("A",self.show_a),
+                          ("H",self.show_help)]:
+            b = Button(text=text)
+            b.bind(on_press=func)
             self.topbar.add_widget(b)
+
         self.add_widget(self.topbar)
+
+        self.north_label = Label(
+            text="N: --°",
+            size_hint=(None,None),
+            size=(dp(120),dp(40)),
+            pos_hint={"right":1,"top":.92}
+        )
+        self.add_widget(self.north_label)
+
+    def build_camera(self):
+        self.camera = Camera(play=True,
+                             resolution=(640,480),
+                             size_hint=(1,.9),
+                             pos_hint={"top":.92})
+        self.add_widget(self.camera)
+
+    # =====================================================
+    # BLE
+    # =====================================================
+
+    def scan_ble(self):
+
+        if not self.bluetoothAdapter:
+            return
+
+        devices = self.bluetoothAdapter.getBondedDevices().toArray()
+
+        for device in devices:
+            name = device.getName()
+            if name and "Arduino" in name:
+                callback = GattCallback(self)
+                self.gatt = device.connectGatt(None, False, callback)
+                return
+
+    def update_north(self, value):
+        try:
+            self.north_value = value
+            self.north_label.text = f"N: {value}°"
+        except:
+            pass
+
+    # =====================================================
+    # SEITEN
+    # =====================================================
+
+    def show_camera(self,*args):
+        self.clear_widgets()
+        self.build_topbar()
+        self.build_camera()
 
     def show_a(self,*args):
         self.clear_widgets()
-        self.add_widget(self.topbar)
+        self.build_topbar()
 
-        arduino_on = self.store.get("arduino")["value"] if self.store.exists("arduino") else False
+        arduino_on = False
+        if self.store.exists("arduino"):
+            arduino_on = self.store.get("arduino")["value"]
 
         if not arduino_on:
             self.add_widget(Label(
@@ -124,25 +158,59 @@ class Dashboard(FloatLayout):
             ))
             return
 
-        layout = BoxLayout(orientation="vertical",padding=20,spacing=20)
+        layout = BoxLayout(orientation="vertical",
+                           padding=20,
+                           spacing=20,
+                           pos_hint={"center_y":.5})
 
-        self.nord_label = Label(text="Norden: --°",font_size=28)
-        layout.add_widget(self.nord_label)
+        status = Label(text="Scan nach Arduino...")
+        layout.add_widget(status)
 
-        self.status_label = Label(text="Nicht verbunden")
-        layout.add_widget(self.status_label)
-
-        scan_btn = Button(text="Scan nach Arduino")
+        scan_btn = Button(text="Verbinden")
         scan_btn.bind(on_press=lambda x:self.scan_ble())
         layout.add_widget(scan_btn)
 
         self.add_widget(layout)
 
-    # Kamera / Galerie Code bleibt wie vorher stabil
+    def show_settings(self,*args):
+        self.clear_widgets()
+        self.build_topbar()
+
+        layout = BoxLayout(orientation="vertical",
+                           padding=20,
+                           spacing=20)
+
+        label = Label(text="Daten von Arduino?")
+        layout.add_widget(label)
+
+        yes = Button(text="JA")
+        no = Button(text="NEIN")
+
+        yes.bind(on_press=lambda x:self.store.put("arduino",value=True))
+        no.bind(on_press=lambda x:self.store.put("arduino",value=False))
+
+        layout.add_widget(yes)
+        layout.add_widget(no)
+
+        self.add_widget(layout)
+
+    def show_gallery(self,*args):
+        self.clear_widgets()
+        self.build_topbar()
+        self.add_widget(Label(text="Galerie folgt..."))
+
+    def show_help(self,*args):
+        self.clear_widgets()
+        self.build_topbar()
+        self.add_widget(Label(
+            text="Bei Fragen oder Problemen\nmelden Sie sich per E-Mail."
+        ))
+
 
 class MainApp(App):
     def build(self):
         return Dashboard()
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     MainApp().run()
