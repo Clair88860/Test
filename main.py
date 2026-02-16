@@ -1,6 +1,6 @@
 import os
 import time
-import struct
+from datetime import datetime
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
@@ -9,27 +9,13 @@ from kivy.uix.image import Image
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.togglebutton import ToggleButton
+from kivy.uix.popup import Popup
+from kivy.uix.textinput import TextInput
+from kivy.uix.floatlayout import FloatLayout
 from kivy.clock import Clock
-from kivy.graphics.texture import Texture
-from kivy.utils import platform
 from kivy.uix.camera import Camera
+from kivy.utils import platform
 
-# ================= BLE (Android only) =================
-
-if platform == "android":
-    from jnius import autoclass, PythonJavaClass, java_method
-    BluetoothAdapter = autoclass("android.bluetooth.BluetoothAdapter")
-    UUID = autoclass("java.util.UUID")
-    PythonActivity = autoclass("org.kivy.android.PythonActivity")
-    mActivity = PythonActivity.mActivity
-else:
-    class PythonJavaClass: pass
-    def java_method(sig): return lambda x: x
-
-CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
-
-
-# ================= HAUPT APP =================
 
 class MainApp(App):
 
@@ -47,75 +33,14 @@ class MainApp(App):
         self.root.add_widget(self.topbar)
         self.root.add_widget(self.content)
 
-        self.angle = 0
-        self.direction = "--"
+        self.arduino_enabled = False
 
         self.show_camera()
-
         return self.root
 
-    # =========================================================
-    # =================== BLE FUNKTIONEN ======================
-    # =========================================================
-
-    def start_scan(self):
-        try:
-            adapter = BluetoothAdapter.getDefaultAdapter()
-            self.scan_cb = self.BLEScanCallback(self)
-            adapter.startLeScan(self.scan_cb)
-        except:
-            self.topbar.text = "Bluetooth Fehler"
-
-    class BLEScanCallback(PythonJavaClass):
-        __javainterfaces__ = ["android/bluetooth/BluetoothAdapter$LeScanCallback"]
-
-        def __init__(self, app):
-            super().__init__()
-            self.app = app
-
-        @java_method("(Landroid/bluetooth/BluetoothDevice;I[B)V")
-        def onLeScan(self, device, rssi, scanRecord):
-            if device.getName() == "Arduino_GCS":
-                adapter = BluetoothAdapter.getDefaultAdapter()
-                adapter.stopLeScan(self)
-                self.app.connect(device)
-
-    def connect(self, device):
-        self.gatt_cb = self.GattCallback(self)
-        self.gatt = device.connectGatt(mActivity, False, self.gatt_cb)
-
-    class GattCallback(PythonJavaClass):
-        __javainterfaces__ = ["android/bluetooth/BluetoothGattCallback"]
-
-        def __init__(self, app):
-            super().__init__()
-            self.app = app
-
-        @java_method("(Landroid/bluetooth/BluetoothGatt;Landroid/bluetooth/BluetoothGattCharacteristic;)V")
-        def onCharacteristicChanged(self, gatt, characteristic):
-            data = characteristic.getValue()
-            if data:
-                angle = struct.unpack('<h', bytes(data))[0]
-                Clock.schedule_once(lambda dt: self.app.update_angle(angle))
-
-    def update_angle(self, angle):
-        self.angle = angle
-        self.direction = self.get_direction(angle)
-        self.topbar.text = f"Winkel: {angle}° | Richtung: {self.direction}"
-
-    def get_direction(self, a):
-        if a >= 337 or a < 22: return "Nord"
-        if a < 67: return "Nordost"
-        if a < 112: return "Ost"
-        if a < 157: return "Suedost"
-        if a < 202: return "Sued"
-        if a < 247: return "Suedwest"
-        if a < 292: return "West"
-        return "Nordwest"
-
-    # =========================================================
-    # =================== KAMERA SEITE ========================
-    # =========================================================
+    # ======================================================
+    # =================== KAMERA ===========================
+    # ======================================================
 
     def show_camera(self):
         self.content.clear_widgets()
@@ -132,38 +57,38 @@ class MainApp(App):
         self.content.add_widget(layout)
 
     def capture(self, instance):
-        timestamp = int(time.time())
-        filename = f"{timestamp}.png"
+        files = sorted([f for f in os.listdir(self.user_data_dir) if f.endswith(".png")])
+        number = len(files) + 1
+        filename = f"{number:04d}.png"
         path = os.path.join(self.user_data_dir, filename)
-        self.camera.export_to_png(path)
 
+        self.camera.export_to_png(path)
         self.show_preview(path)
 
     def show_preview(self, path):
         self.content.clear_widgets()
 
         layout = BoxLayout(orientation="vertical")
-
         img = Image(source=path)
         layout.add_widget(img)
 
-        buttons = BoxLayout(size_hint_y=0.2)
+        btns = BoxLayout(size_hint_y=0.2)
 
         save = Button(text="Speichern")
         repeat = Button(text="Wiederholen")
 
-        save.bind(on_press=lambda x: self.show_camera())
+        save.bind(on_press=lambda x: self.show_gallery())
         repeat.bind(on_press=lambda x: self.show_camera())
 
-        buttons.add_widget(save)
-        buttons.add_widget(repeat)
+        btns.add_widget(save)
+        btns.add_widget(repeat)
 
-        layout.add_widget(buttons)
+        layout.add_widget(btns)
         self.content.add_widget(layout)
 
-    # =========================================================
-    # =================== GALERIE =============================
-    # =========================================================
+    # ======================================================
+    # =================== GALERIE ==========================
+    # ======================================================
 
     def show_gallery(self):
         self.content.clear_widgets()
@@ -172,60 +97,151 @@ class MainApp(App):
         grid = GridLayout(cols=2, spacing=10, size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
 
-        files = sorted(os.listdir(self.user_data_dir))
+        files = sorted([f for f in os.listdir(self.user_data_dir) if f.endswith(".png")])
 
         for f in files:
-            if f.endswith(".png"):
-                box = BoxLayout(orientation="vertical", size_hint_y=None, height=500)
-
-                lbl = Label(text=f)
-                img = Image(source=os.path.join(self.user_data_dir, f))
-
-                box.add_widget(lbl)
-                box.add_widget(img)
-                grid.add_widget(box)
+            img = Image(source=os.path.join(self.user_data_dir, f))
+            img.size_hint_y = None
+            img.height = 500
+            img.bind(on_touch_down=lambda inst, touch, file=f:
+                     self.open_single_view(file) if inst.collide_point(*touch.pos) else None)
+            grid.add_widget(img)
 
         scroll.add_widget(grid)
         self.content.add_widget(scroll)
 
-    # =========================================================
-    # =================== E SEITE =============================
-    # =========================================================
+    # ======================================================
+    # ================= EINZELANSICHT ======================
+    # ======================================================
+
+    def open_single_view(self, filename):
+        self.content.clear_widgets()
+
+        path = os.path.join(self.user_data_dir, filename)
+        layout = BoxLayout(orientation="vertical")
+
+        # Bild mit Overlay
+        float_layout = FloatLayout()
+        img = Image(source=path)
+        float_layout.add_widget(img)
+
+        if self.arduino_enabled:
+            overlay = Label(
+                text="Norden",
+                color=(1,1,1,1),
+                size_hint=(None,None),
+                pos_hint={"right":1,"top":1}
+            )
+            float_layout.add_widget(overlay)
+
+        layout.add_widget(float_layout)
+
+        # Name + i Button
+        name_row = BoxLayout(size_hint_y=0.15)
+
+        name_label = Label(text=filename.replace(".png",""))
+        info_btn = Button(text="i", size_hint_x=0.2)
+
+        info_btn.bind(on_press=lambda x: self.open_info_popup(filename))
+
+        name_row.add_widget(name_label)
+        name_row.add_widget(info_btn)
+
+        layout.add_widget(name_row)
+        self.content.add_widget(layout)
+
+    # ======================================================
+    # ================= INFO POPUP =========================
+    # ======================================================
+
+    def open_info_popup(self, filename):
+        path = os.path.join(self.user_data_dir, filename)
+        box = BoxLayout(orientation="vertical", spacing=10, padding=10)
+
+        # Umbenennen
+        name_input = TextInput(text=filename.replace(".png",""), multiline=False)
+
+        def save_name(instance):
+            new_name = name_input.text + ".png"
+            new_path = os.path.join(self.user_data_dir, new_name)
+            os.rename(path, new_path)
+            popup.dismiss()
+            self.show_gallery()
+
+        box.add_widget(Label(text="Name (bearbeiten):"))
+        box.add_widget(name_input)
+
+        # Datum
+        timestamp = os.path.getmtime(path)
+        date = datetime.fromtimestamp(timestamp).strftime("%d.%m.%Y %H:%M")
+
+        box.add_widget(Label(text=f"Datum: {date}"))
+
+        # Löschen
+        def confirm_delete(instance):
+            confirm_box = BoxLayout(orientation="vertical")
+            confirm_box.add_widget(Label(text="Wirklich löschen?"))
+
+            yes = Button(text="Ja")
+            no = Button(text="Nein")
+
+            def delete_now(x):
+                os.remove(path)
+                confirm_popup.dismiss()
+                popup.dismiss()
+                self.show_gallery()
+
+            yes.bind(on_press=delete_now)
+            no.bind(on_press=lambda x: confirm_popup.dismiss())
+
+            confirm_box.add_widget(yes)
+            confirm_box.add_widget(no)
+
+            confirm_popup = Popup(title="Sicherheitsabfrage",
+                                  content=confirm_box,
+                                  size_hint=(0.7,0.4))
+            confirm_popup.open()
+
+        delete_btn = Button(text="Foto löschen")
+        delete_btn.bind(on_press=confirm_delete)
+        box.add_widget(delete_btn)
+
+        save_btn = Button(text="Speichern")
+        save_btn.bind(on_press=save_name)
+        box.add_widget(save_btn)
+
+        popup = Popup(title="Info",
+                      content=box,
+                      size_hint=(0.8,0.8))
+        popup.open()
+
+    # ======================================================
+    # =================== E SEITE ==========================
+    # ======================================================
 
     def show_e(self):
         self.content.clear_widgets()
-
         layout = BoxLayout(orientation="vertical", spacing=20, padding=20)
 
-        def row(title):
-            r = BoxLayout()
-            r.add_widget(Label(text=title))
+        row = BoxLayout()
+        row.add_widget(Label(text="Mit Arduino"))
 
-            ja = ToggleButton(text="Ja", group=title)
-            nein = ToggleButton(text="Nein", group=title)
+        ja = ToggleButton(text="Ja", group="arduino")
+        nein = ToggleButton(text="Nein", group="arduino", state="down")
 
-            def toggle(btn):
-                if btn.state == "down":
-                    btn.background_color = (0,0.5,0,1)
-                else:
-                    btn.background_color = (1,1,1,1)
+        def toggle(btn):
+            if btn.state == "down" and btn.text == "Ja":
+                self.arduino_enabled = True
+            elif btn.state == "down" and btn.text == "Nein":
+                self.arduino_enabled = False
 
-            ja.bind(on_press=toggle)
-            nein.bind(on_press=toggle)
+        ja.bind(on_press=toggle)
+        nein.bind(on_press=toggle)
 
-            r.add_widget(ja)
-            r.add_widget(nein)
-            return r
+        row.add_widget(ja)
+        row.add_widget(nein)
 
-        layout.add_widget(row("Mit Arduino"))
-        layout.add_widget(row("Mit Entzerrung"))
-        layout.add_widget(row("Automatisches Speichern"))
-        layout.add_widget(row("Mit Winkel"))
-
-        scan_btn = Button(text="Scan starten", size_hint_y=0.2)
-        scan_btn.bind(on_press=lambda x: self.start_scan())
-        layout.add_widget(scan_btn)
-
+        layout.add_widget(row)
         self.content.add_widget(layout)
 
 
