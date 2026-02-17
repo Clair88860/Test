@@ -1,54 +1,110 @@
-#include <ArduinoBLE.h>
+from kivy.app import App
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.label import Label
+from kivy.uix.button import Button
+from kivy.clock import Clock
+from kivy.utils import platform
 
-// Eigene UUIDs (wichtig!)
-BLEService dataService("12345678-1234-5678-1234-56789abcdef0");
-BLEIntCharacteristic dataChar(
-  "12345678-1234-5678-1234-56789abcdef1",
-  BLERead | BLENotify
-);
+if platform == "android":
+    from jnius import autoclass, PythonJavaClass, java_method
+    BluetoothAdapter = autoclass("android.bluetooth.BluetoothAdapter")
+    BluetoothGattDescriptor = autoclass("android.bluetooth.BluetoothGattDescriptor")
+    UUID = autoclass("java.util.UUID")
+    PythonActivity = autoclass("org.kivy.android.PythonActivity")
+    mActivity = PythonActivity.mActivity
 
-int angle = 0;
+SERVICE_UUID = "12345678-1234-5678-1234-56789abcdef0"
+CHAR_UUID    = "12345678-1234-5678-1234-56789abcdef1"
+CCCD_UUID    = "00002902-0000-1000-8000-00805f9b34fb"
 
-void setup() {
-  Serial.begin(9600);
-  while (!Serial);
 
-  if (!BLE.begin()) {
-    Serial.println("BLE Fehler!");
-    while (1);
-  }
+class BLEScanCallback(PythonJavaClass):
+    __javainterfaces__ = ["android/bluetooth/BluetoothAdapter$LeScanCallback"]
 
-  BLE.setLocalName("Arduino_GCS");
-  BLE.setAdvertisedService(dataService);
+    def __init__(self, app):
+        super().__init__()
+        self.app = app
 
-  dataService.addCharacteristic(dataChar);
-  BLE.addService(dataService);
+    @java_method("(Landroid/bluetooth/BluetoothDevice;I[B)V")
+    def onLeScan(self, device, rssi, scanRecord):
+        if device.getName() == "Arduino_GCS":
+            BluetoothAdapter.getDefaultAdapter().stopLeScan(self.app.scan_cb)
+            self.app.connect(device)
 
-  dataChar.writeValue(angle);
 
-  BLE.advertise();
-  Serial.println("BLE gestartet");
-}
+class GattCallback(PythonJavaClass):
+    __javainterfaces__ = ["android/bluetooth/BluetoothGattCallback"]
 
-void loop() {
+    def __init__(self, app):
+        super().__init__()
+        self.app = app
 
-  BLEDevice central = BLE.central();
+    @java_method("(Landroid/bluetooth/BluetoothGatt;II)V")
+    def onConnectionStateChange(self, gatt, status, newState):
+        if newState == 2:
+            Clock.schedule_once(lambda dt: gatt.discoverServices(), 1)
 
-  if (central) {
-    Serial.println("Verbunden");
+    @java_method("(Landroid/bluetooth/BluetoothGatt;I)V")
+    def onServicesDiscovered(self, gatt, status):
 
-    while (central.connected()) {
+        service = gatt.getService(UUID.fromString(SERVICE_UUID))
+        characteristic = service.getCharacteristic(UUID.fromString(CHAR_UUID))
 
-      angle = (angle + 10) % 360;
+        gatt.setCharacteristicNotification(characteristic, True)
 
-      dataChar.writeValue(angle);
+        descriptor = characteristic.getDescriptor(UUID.fromString(CCCD_UUID))
+        descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+        gatt.writeDescriptor(descriptor)
 
-      Serial.print("Winkel: ");
-      Serial.println(angle);
+    @java_method("(Landroid/bluetooth/BluetoothGatt;Landroid/bluetooth/BluetoothGattCharacteristic;)V")
+    def onCharacteristicChanged(self, gatt, characteristic):
 
-      delay(500);
-    }
+        data = bytes(characteristic.getValue())
+        direction = data.decode("utf-8")
 
-    Serial.println("Getrennt");
-  }
-}
+        Clock.schedule_once(lambda dt: self.app.update_direction(direction))
+
+
+class BLEApp(App):
+
+    def build(self):
+
+        layout = BoxLayout(orientation='vertical', padding=30, spacing=20)
+
+        self.direction_label = Label(text="---", font_size=80)
+        self.button = Button(text="Scan starten", size_hint_y=0.2)
+        self.button.bind(on_press=self.start_scan)
+
+        layout.add_widget(self.direction_label)
+        layout.add_widget(self.button)
+
+        self.scan_cb = None
+        self.gatt_cb = None
+        self.gatt = None
+
+        return layout
+
+    def on_start(self):
+        if platform == "android":
+            from android.permissions import request_permissions, Permission
+            request_permissions([
+                Permission.ACCESS_FINE_LOCATION,
+                Permission.BLUETOOTH_SCAN,
+                Permission.BLUETOOTH_CONNECT
+            ], lambda x, y: None)
+
+    def start_scan(self, instance):
+        adapter = BluetoothAdapter.getDefaultAdapter()
+        self.scan_cb = BLEScanCallback(self)
+        adapter.startLeScan(self.scan_cb)
+
+    def connect(self, device):
+        self.gatt_cb = GattCallback(self)
+        self.gatt = device.connectGatt(mActivity, False, self.gatt_cb, 2)
+
+    def update_direction(self, direction):
+        self.direction_label.text = direction
+
+
+if __name__ == "__main__":
+    BLEApp().run()
