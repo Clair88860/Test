@@ -44,10 +44,10 @@ class GattCallback(PythonJavaClass):
 
     @java_method("(Landroid/bluetooth/BluetoothGatt;II)V")
     def onConnectionStateChange(self, gatt, status, newState):
-        if newState == 2: # STATE_CONNECTED
+        if newState == 2:  # STATE_CONNECTED
             self.app.log("Verbunden! Suche Services...")
             Clock.schedule_once(lambda dt: gatt.discoverServices(), 1.0)
-        elif newState == 0: # STATE_DISCONNECTED
+        elif newState == 0:  # STATE_DISCONNECTED
             self.app.log("Verbindung getrennt.")
 
     @java_method("(Landroid/bluetooth/BluetoothGatt;I)V")
@@ -57,27 +57,33 @@ class GattCallback(PythonJavaClass):
         for i in range(services.size()):
             s = services.get(i)
             s_uuid = s.getUuid().toString().lower()
-            if "180a" in s_uuid:  # Service UUID deines Arduino
-                chars = s.getCharacteristics()
-                for j in range(chars.size()):
-                    c = chars.get(j)
-                    if "2a57" in c.getUuid().toString().lower():  # Characteristic UUID
-                        gatt.setCharacteristicNotification(c, True)
-                        d = c.getDescriptor(UUID.fromString(CCCD_UUID))
-                        if d:
-                            d.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
-                            gatt.writeDescriptor(d)
+            self.app.log(f"Service UUID: {s_uuid}")
+            chars = s.getCharacteristics()
+            for j in range(chars.size()):
+                c = chars.get(j)
+                c_uuid = c.getUuid().toString().lower()
+                self.app.log(f"Characteristic UUID: {c_uuid}")
+                # Prüfe deine Arduino-Winkel-Characteristic UUID
+                if "2a57" in c_uuid:
+                    self.app.log(f"Winkel-Characteristic gefunden: {c_uuid}")
+                    gatt.setCharacteristicNotification(c, True)
+                    d = c.getDescriptor(UUID.fromString(CCCD_UUID))
+                    if d:
+                        d.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
+                        gatt.writeDescriptor(d)
+                        self.app.log("Notifications aktiviert")
 
     @java_method("(Landroid/bluetooth/BluetoothGatt;Landroid/bluetooth/BluetoothGattCharacteristic;)V")
     def onCharacteristicChanged(self, gatt, characteristic):
         data = characteristic.getValue()
+        self.app.log(f"Daten empfangen: {list(data)}")
         if data:
             try:
-                # Dein Arduino sendet Integer (16-bit)
-                angle = int.from_bytes(bytes(data), byteorder='little', signed=True)
+                # 16-bit signed int vom Arduino
+                angle = struct.unpack('<h', bytes(data))[0]
                 Clock.schedule_once(lambda dt: self.app.update_data(angle))
             except Exception as e:
-                self.app.log(f"Fehler: {str(e)}")
+                self.app.log(f"Fehler bei Datenkonvertierung: {str(e)}")
 
 class BLEApp(App):
     def build(self):
@@ -91,7 +97,7 @@ class BLEApp(App):
         self.root.add_widget(self.angle_lbl)
         self.root.add_widget(self.status_btn)
         self.root.add_widget(self.scroll)
-        
+
         self.gatt = None
         self.scan_cb = None
         self.gatt_cb = None
@@ -133,6 +139,7 @@ class BLEApp(App):
         adapter.stopLeScan(self.scan_cb)
         self.log(f"Verbinde mit {device.getAddress()}...")
         self.gatt_cb = GattCallback(self)
+        # 2 = TRANSPORT_LE
         self.gatt = device.connectGatt(mActivity, False, self.gatt_cb, 2)
 
     def update_data(self, angle):
