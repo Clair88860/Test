@@ -5,16 +5,16 @@ from kivy.clock import Clock
 import asyncio
 import threading
 from bleak import BleakClient, BleakScanner
-import struct
 
-TARGET_NAME = "Nano33BLE"
-ANGLE_CHAR_UUID = "2A19"
+TARGET_NAME = "Arduino_GCS"
+ANGLE_CHAR_UUID = "2A57"  # Integer-Characteristic aus deinem Arduino-Code
 
 class AngleApp(App):
     def build(self):
         self.label = Label(text="Keine Verbindung...")
         layout = BoxLayout(orientation='vertical')
         layout.add_widget(self.label)
+
         # Direkt beim Start BLE-Scan starten
         threading.Thread(target=self.connect_arduino, daemon=True).start()
         return layout
@@ -24,7 +24,7 @@ class AngleApp(App):
 
     async def ble_loop(self):
         while True:
-            # Arduino scannen
+            # Scan nach Arduino
             devices = await BleakScanner.discover()
             target = None
             for d in devices:
@@ -37,11 +37,11 @@ class AngleApp(App):
                     async with BleakClient(target.address) as client:
                         Clock.schedule_once(lambda dt: setattr(self.label, 'text', f"Verbunden mit {TARGET_NAME}"))
 
-                        # Callback für eingehende Daten
+                        # Callback für Integer-Daten
                         def callback(sender, data):
-                            # Arduino sendet Float als 4-Byte Little Endian
-                            angle = struct.unpack('<f', data)[0]
-                            Clock.schedule_once(lambda dt: setattr(self.label, 'text', f"Neigung: {angle:.2f}°"))
+                            # data ist ein bytes-Objekt, 4 Bytes für int32
+                            angle = int.from_bytes(data, byteorder='little', signed=True)
+                            Clock.schedule_once(lambda dt: setattr(self.label, 'text', f"Winkel: {angle}°"))
 
                         await client.start_notify(ANGLE_CHAR_UUID, callback)
 
