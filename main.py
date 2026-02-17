@@ -2,6 +2,7 @@ from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.button import Button
+from kivy.uix.scrollview import ScrollView
 from kivy.clock import Clock
 from kivy.utils import platform
 
@@ -12,6 +13,7 @@ if platform == "android":
     UUID = autoclass("java.util.UUID")
     PythonActivity = autoclass("org.kivy.android.PythonActivity")
     mActivity = PythonActivity.mActivity
+
 
 SERVICE_UUID = "12345678-1234-5678-1234-56789abcdef0"
 CHAR_UUID    = "12345678-1234-5678-1234-56789abcdef1"
@@ -27,7 +29,11 @@ class BLEScanCallback(PythonJavaClass):
 
     @java_method("(Landroid/bluetooth/BluetoothDevice;I[B)V")
     def onLeScan(self, device, rssi, scanRecord):
-        if device.getName() == "Arduino_GCS":
+        name = device.getName()
+        self.app.log(f"Gefunden: {name}")
+
+        if name == "Arduino_GCS":
+            self.app.log("Arduino erkannt – verbinde...")
             BluetoothAdapter.getDefaultAdapter().stopLeScan(self.app.scan_cb)
             self.app.connect(device)
 
@@ -42,13 +48,24 @@ class GattCallback(PythonJavaClass):
     @java_method("(Landroid/bluetooth/BluetoothGatt;II)V")
     def onConnectionStateChange(self, gatt, status, newState):
         if newState == 2:
+            self.app.log("Verbunden")
             Clock.schedule_once(lambda dt: gatt.discoverServices(), 1)
+        elif newState == 0:
+            self.app.log("Getrennt")
 
     @java_method("(Landroid/bluetooth/BluetoothGatt;I)V")
     def onServicesDiscovered(self, gatt, status):
+        self.app.log("Services entdeckt")
 
         service = gatt.getService(UUID.fromString(SERVICE_UUID))
+        if not service:
+            self.app.log("Service NICHT gefunden")
+            return
+
         characteristic = service.getCharacteristic(UUID.fromString(CHAR_UUID))
+        if not characteristic:
+            self.app.log("Characteristic NICHT gefunden")
+            return
 
         gatt.setCharacteristicNotification(characteristic, True)
 
@@ -56,12 +73,12 @@ class GattCallback(PythonJavaClass):
         descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE)
         gatt.writeDescriptor(descriptor)
 
+        self.app.log("Notifications aktiviert")
+
     @java_method("(Landroid/bluetooth/BluetoothGatt;Landroid/bluetooth/BluetoothGattCharacteristic;)V")
     def onCharacteristicChanged(self, gatt, characteristic):
-
         data = bytes(characteristic.getValue())
         direction = data.decode("utf-8")
-
         Clock.schedule_once(lambda dt: self.app.update_direction(direction))
 
 
@@ -69,20 +86,31 @@ class BLEApp(App):
 
     def build(self):
 
-        layout = BoxLayout(orientation='vertical', padding=30, spacing=20)
+        layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
 
-        self.direction_label = Label(text="---", font_size=80)
-        self.button = Button(text="Scan starten", size_hint_y=0.2)
-        self.button.bind(on_press=self.start_scan)
+        self.direction_label = Label(text="---", font_size=70, size_hint_y=0.3)
+
+        self.scan_btn = Button(text="Scan starten", size_hint_y=0.15)
+        self.scan_btn.bind(on_press=self.start_scan)
+
+        self.log_label = Label(text="Bereit\n", size_hint_y=None)
+        self.log_label.bind(texture_size=self.log_label.setter('size'))
+
+        scroll = ScrollView(size_hint_y=0.4)
+        scroll.add_widget(self.log_label)
 
         layout.add_widget(self.direction_label)
-        layout.add_widget(self.button)
+        layout.add_widget(self.scan_btn)
+        layout.add_widget(scroll)
 
         self.scan_cb = None
-        self.gatt_cb = None
         self.gatt = None
 
         return layout
+
+    def log(self, text):
+        Clock.schedule_once(lambda dt:
+            setattr(self.log_label, "text", self.log_label.text + text + "\n"))
 
     def on_start(self):
         if platform == "android":
@@ -94,16 +122,29 @@ class BLEApp(App):
             ], lambda x, y: None)
 
     def start_scan(self, instance):
+
         adapter = BluetoothAdapter.getDefaultAdapter()
+
+        if not adapter:
+            self.log("Kein Bluetooth Adapter")
+            return
+
+        if not adapter.isEnabled():
+            self.log("Bluetooth ist AUS")
+            return
+
+        self.log("Scan gestartet...")
         self.scan_cb = BLEScanCallback(self)
         adapter.startLeScan(self.scan_cb)
 
     def connect(self, device):
+        self.log("Verbinde...")
         self.gatt_cb = GattCallback(self)
-        self.gatt = device.connectGatt(mActivity, False, self.gatt_cb, 2)
+        self.gatt = device.connectGatt(mActivity, False, self.gatt_cb)
 
     def update_direction(self, direction):
         self.direction_label.text = direction
+        self.log(f"Neue Richtung: {direction}")
 
 
 if __name__ == "__main__":
