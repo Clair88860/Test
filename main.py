@@ -60,7 +60,9 @@ class GattCallback(PythonJavaClass):
             self.app.log("Verbunden! Suche Services...")
             Clock.schedule_once(lambda dt: gatt.discoverServices(), 1.0)
         elif newState == 0:  # STATE_DISCONNECTED
-            self.app.log("Verbindung getrennt.")
+            self.app.log("Verbindung getrennt. Versuche Reconnect...")
+            # Auto-Reconnect nach 2 Sekunden
+            Clock.schedule_once(lambda dt: self.app.start_scan(), 2.0)
 
     @java_method("(Landroid/bluetooth/BluetoothGatt;I)V")
     def onServicesDiscovered(self, gatt, status):
@@ -75,8 +77,7 @@ class GattCallback(PythonJavaClass):
                 c = chars.get(j)
                 c_uuid = c.getUuid().toString().lower()
                 self.app.log(f"Characteristic UUID: {c_uuid}")
-                # Arduino Winkel-Characteristic
-                if "2a57" in c_uuid:
+                if "2a57" in c_uuid:  # Arduino Winkel-Characteristic
                     self.app.log(f"Winkel-Characteristic gefunden: {c_uuid}")
                     gatt.setCharacteristicNotification(c, True)
                     d = c.getDescriptor(UUID.fromString(CCCD_UUID))
@@ -158,7 +159,8 @@ class BLEApp(App):
         adapter.stopLeScan(self.scan_cb)
         self.log(f"Verbinde mit {device.getAddress()}...")
         self.gatt_cb = GattCallback(self)
-        self.gatt = device.connectGatt(mActivity, False, self.gatt_cb, 2)  # TRANSPORT_LE
+        # autoConnect=True für stabilere Verbindung
+        self.gatt = device.connectGatt(mActivity, True, self.gatt_cb, 2)
 
     # ----- Winkel und Richtung anzeigen -----
     def update_data(self, angle):
