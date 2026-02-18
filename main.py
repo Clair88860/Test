@@ -141,7 +141,6 @@ class Dashboard(FloatLayout):
     # =====================================================
     def build_camera(self):
         self.camera = Camera(play=False, resolution=(1920, 1080))
-        # Fast Vollbild: Topbar 8%, Button unten 8%
         self.camera.size_hint = (1, 0.84)
         self.camera.pos_hint = {"x": 0, "y": 0.08}
 
@@ -166,7 +165,7 @@ class Dashboard(FloatLayout):
     def show_camera(self, *args):
         self.clear_widgets()
         self.add_widget(self.topbar)
-        if check_permission and not check_permission(Permission.CAMERA):
+        if check_permission and not check_permission(Permission):
             self.add_widget(Label(text="Kamera Berechtigung fehlt", pos_hint={"center_x": .5, "center_y": .5}))
             return
         self.camera.play = True
@@ -180,7 +179,6 @@ class Dashboard(FloatLayout):
     # Overlay für Entzerrung
     # =====================================================
     def init_overlay(self):
-        # Eckpunkte hinzufügen
         self.corners = []
         for i in range(4):
             c = DraggableCorner()
@@ -213,7 +211,7 @@ class Dashboard(FloatLayout):
         self.overlay_line.points = points
 
     # =====================================================
-    # Foto aufnehmen
+    # Foto aufnehmen + perspektivische Korrektur
     # =====================================================
     def take_photo(self, instance):
         number = self.get_next_number()
@@ -254,12 +252,110 @@ class Dashboard(FloatLayout):
         self.add_widget(layout)
 
     # =====================================================
-    # Rest deines Main Codes bleibt unverändert (Galerie, A/H/Settings etc.)
+    # Galerie
     # =====================================================
+    def show_gallery(self, *args):
+        self.clear_widgets()
+        self.add_widget(self.topbar)
+        files = sorted([f for f in os.listdir(self.photos_dir) if f.endswith(".png")])
+        if not files:
+            self.add_widget(Label(text="Keine Fotos vorhanden", font_size=24,
+                                  pos_hint={"center_x": .5, "center_y": .5}))
+            return
+        scroll = ScrollView()
+        grid = GridLayout(cols=2, spacing=10, padding=[10, 120, 10, 10], size_hint_y=None)
+        grid.bind(minimum_height=grid.setter("height"))
+        for file in files:
+            box = BoxLayout(orientation="vertical", size_hint_y=None, height=dp(280), spacing=5)
+            img = Image(source=os.path.join(self.photos_dir, file), allow_stretch=True)
+            img.bind(on_touch_down=lambda inst, touch, f=file:
+                     self.open_image(f) if inst.collide_point(*touch.pos) else None)
+            name = Label(text=file.replace(".png", ""), size_hint_y=None, height=dp(25))
+            box.add_widget(img); box.add_widget(name)
+            grid.add_widget(box)
+        scroll.add_widget(grid)
+        self.add_widget(scroll)
+
+    # =====================================================
+    # Einzelansicht
+    # =====================================================
+    def open_image(self, filename):
+        self.clear_widgets()
+        self.add_widget(self.topbar)
+        layout = BoxLayout(orientation="vertical")
+        path = os.path.join(self.photos_dir, filename)
+        img = Image(source=path, allow_stretch=True)
+        layout.add_widget(img)
+        btns = BoxLayout(size_hint_y=0.2)
+        back = Button(text="Zurück")
+        back.bind(on_press=lambda x: self.show_gallery())
+        btns.add_widget(back)
+        layout.add_widget(btns)
+        self.add_widget(layout)
+
+    # =====================================================
+    # Einstellungen
+    # =====================================================
+    def show_settings(self, *args):
+        self.clear_widgets()
+        self.add_widget(self.topbar)
+        layout = BoxLayout(orientation="vertical", padding=[20, 120, 20, 20], spacing=20)
+        layout.add_widget(Label(text="Einstellungen", font_size=32, size_hint_y=None, height=dp(60)))
+
+        def create_toggle_row(text, key):
+            row = BoxLayout(size_hint_y=None, height=dp(60))
+            label = Label(text=text)
+            btn_ja = Button(text="Ja", size_hint=(None, None), size=(dp(80), dp(45)))
+            btn_nein = Button(text="Nein", size_hint=(None, None), size=(dp(80), dp(45)))
+            value = self.store.get(key)["value"] if self.store.exists(key) else False
+
+            def update(selected):
+                if selected:
+                    btn_ja.background_color = (0, 0.6, 0, 1)
+                    btn_nein.background_color = (1, 1, 1, 1)
+                else:
+                    btn_nein.background_color = (0, 0.6, 0, 1)
+                    btn_ja.background_color = (1, 1, 1, 1)
+
+            update(value)
+            btn_ja.bind(on_press=lambda x: [self.store.put(key, value=True), update(True)])
+            btn_nein.bind(on_press=lambda x: [self.store.put(key, value=False), update(False)])
+            row.add_widget(label)
+            row.add_widget(btn_ja)
+            row.add_widget(btn_nein)
+            return row
+
+        layout.add_widget(create_toggle_row("Mit Arduino Daten", "arduino"))
+        layout.add_widget(create_toggle_row("Mit Winkel", "winkel"))
+        layout.add_widget(create_toggle_row("Automatisch speichern", "auto"))
+        self.add_widget(layout)
+
+    # =====================================================
+    # A-Seite
+    # =====================================================
+    def show_a(self, *args):
+        self.clear_widgets()
+        self.add_widget(self.topbar)
+        arduino_on = self.store.get("arduino")["value"] if self.store.exists("arduino") else False
+        text = "Arduino Daten angezeigt." if arduino_on else "Daten erst in Einstellungen aktivieren"
+        self.add_widget(Label(text=text, font_size=24, pos_hint={"center_x": .5, "center_y": .5}))
+
+    # =====================================================
+    # Hilfe
+    # =====================================================
+    def show_help(self, *args):
+        self.clear_widgets()
+        self.add_widget(self.topbar)
+        self.add_widget(Label(
+            text="Bei Fragen oder Problemen kontaktieren Sie uns per E-Mail.",
+            font_size=20, pos_hint={"center_x": .5, "center_y": .5}
+        ))
+
 
 class MainApp(App):
     def build(self):
         return Dashboard()
+
 
 if __name__ == "__main__":
     MainApp().run()
