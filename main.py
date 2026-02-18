@@ -3,7 +3,7 @@ import numpy as np
 from kivy.app import App
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.image import Image
-from kivy.graphics import Color, Line
+from kivy.graphics import Color, Line, Ellipse
 from kivy.clock import Clock
 from kivy.core.camera import Camera as CoreCamera
 from kivy.graphics.texture import Texture
@@ -23,19 +23,32 @@ class ScannerApp(App):
 
         self.layout = FloatLayout()
 
-        # Kamera
+        # Kamera starten
         self.camera = CoreCamera(index=0, resolution=(1280, 720))
         self.camera.start()
 
         self.image = Image(size_hint=(1, 1))
         self.layout.add_widget(self.image)
 
-        # Overlay
+        # Overlay Punkte (Startrechteck)
+        self.points = [
+            [200, 1200],
+            [900, 1200],
+            [900, 300],
+            [200, 300]
+        ]
+
         with self.image.canvas:
             Color(0, 1, 0, 1)
             self.line = Line(width=3)
+            self.circles = []
+            for p in self.points:
+                c = Ellipse(pos=(p[0]-15, p[1]-15), size=(30, 30))
+                self.circles.append(c)
 
-        # Button
+        self.update_overlay()
+
+        # Scan Button
         self.capture_btn = Button(
             text="Scannen",
             size_hint=(1, 0.1),
@@ -44,9 +57,92 @@ class ScannerApp(App):
         self.capture_btn.bind(on_press=self.capture)
         self.layout.add_widget(self.capture_btn)
 
+        self.image.bind(on_touch_down=self.on_touch_down)
+        self.image.bind(on_touch_move=self.on_touch_move)
+
         Clock.schedule_interval(self.update, 1.0 / 30.0)
 
+        self.drag_index = None
+
         return self.layout
+
+    # Kamera aktualisieren
+    def update(self, dt):
+
+        frame = self.camera.texture
+        if not frame:
+            return
+
+        buf = frame.pixels
+        w, h = frame.size
+        img = np.frombuffer(buf, np.uint8).reshape(h, w, 4)
+        img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
+
+        # Hochformat
+        img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
+        self.current_frame = img.copy()
+
+        flipped = cv2.flip(img, 0)
+        tex = Texture.create(size=(img.shape[1], img.shape[0]), colorfmt='bgr')
+        tex.blit_buffer(flipped.tobytes(), colorfmt='bgr', bufferfmt='ubyte')
+        self.image.texture = tex
+
+    # Overlay aktualisieren
+    def update_overlay(self):
+        flat = []
+        for p in self.points:
+            flat.extend(p)
+        self.line.points = flat + flat[:2]
+
+        for i, p in enumerate(self.points):
+            self.circles[i].pos = (p[0]-15, p[1]-15)
+
+    # Punkt anklicken
+    def on_touch_down(self, instance, touch):
+        for i, p in enumerate(self.points):
+            if abs(touch.x - p[0]) < 30 and abs(touch.y - p[1]) < 30:
+                self.drag_index = i
+                return True
+        return False
+
+    # Punkt verschieben
+    def on_touch_move(self, instance, touch):
+        if self.drag_index is not None:
+            self.points[self.drag_index] = [touch.x, touch.y]
+            self.update_overlay()
+            return True
+        return False
+
+    # Perspektivische Entzerrung
+    def capture(self, instance):
+
+        if not hasattr(self, "current_frame"):
+            return
+
+        img = self.current_frame
+        img_h, img_w, _ = img.shape
+
+        # Punkte auf Bildgröße mappen
+        mapped = []
+        for p in self.points:
+            x = int((p[0] / self.image.width) * img_w)
+            y = int((p[1] / self.image.height) * img_h)
+            mapped.append([x, y])
+
+        pts = np.array(mapped, dtype="float32")
+
+        rect = self.order_points(pts)
+        warped = self.four_point_transform(img, rect)
+
+        self.line.points = []
+        for c in self.circles:
+            c.size = (0, 0)
+
+        flipped = cv2.flip(warped, 0)
+        tex = Texture.create(size=(warped.shape[1], warped.shape[0]), colorfmt='bgr')
+        tex.blit_buffer(flipped.tobytes(), colorfmt='bgr', bufferfmt='ubyte')
+        self.image.texture = tex
 
     def order_points(self, pts):
         rect = np.zeros((4, 2), dtype="float32")
@@ -58,8 +154,7 @@ class ScannerApp(App):
         rect[3] = pts[np.argmax(diff)]
         return rect
 
-    def four_point_transform(self, image, pts):
-        rect = self.order_points(pts)
+    def four_point_transform(self, image, rect):
         (tl, tr, br, bl) = rect
 
         widthA = np.linalg.norm(br - bl)
@@ -79,77 +174,6 @@ class ScannerApp(App):
         M = cv2.getPerspectiveTransform(rect, dst)
         warped = cv2.warpPerspective(image, M, (maxWidth, maxHeight))
         return warped
-
-    def update(self, dt):
-
-        frame = self.camera.texture
-        if not frame:
-            return
-
-        buf = frame.pixels
-        w, h = frame.size
-        img = np.frombuffer(buf, np.uint8).reshape(h, w, 4)
-        img = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
-
-        # Hochformat drehen
-        img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-
-        self.current_frame = img.copy()
-
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        blur = cv2.GaussianBlur(gray, (5, 5), 0)
-        edges = cv2.Canny(blur, 75, 200)
-
-        contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
-        contours = sorted(contours, key=cv2.contourArea, reverse=True)[:5]
-
-        self.doc_cnt = None
-
-        for c in contours:
-            peri = cv2.arcLength(c, True)
-            approx = cv2.approxPolyDP(c, 0.02 * peri, True)
-            if len(approx) == 4:
-                self.doc_cnt = approx
-                break
-
-        if self.doc_cnt is not None:
-            pts = self.doc_cnt.reshape(4, 2)
-
-            # Overlay zeichnen
-            scaled = []
-            img_h, img_w, _ = img.shape
-            widget_w = self.image.width
-            widget_h = self.image.height
-
-            for p in pts:
-                x = (p[0] / img_w) * widget_w
-                y = (p[1] / img_h) * widget_h
-                scaled.extend([x, widget_h - y])
-
-            self.line.points = scaled + scaled[:2]
-
-        # Bild anzeigen
-        flipped = cv2.flip(img, 0)
-        tex = Texture.create(size=(img.shape[1], img.shape[0]), colorfmt='bgr')
-        tex.blit_buffer(flipped.tobytes(), colorfmt='bgr', bufferfmt='ubyte')
-        self.image.texture = tex
-
-    def capture(self, instance):
-
-        if self.doc_cnt is None:
-            return
-
-        warped = self.four_point_transform(self.current_frame,
-                                            self.doc_cnt.reshape(4, 2))
-
-        cv2.imwrite("scan.jpg", warped)
-
-        # Ergebnis anzeigen
-        self.line.points = []
-        tex = Texture.create(size=(warped.shape[1], warped.shape[0]), colorfmt='bgr')
-        flipped = cv2.flip(warped, 0)
-        tex.blit_buffer(flipped.tobytes(), colorfmt='bgr', bufferfmt='ubyte')
-        self.image.texture = tex
 
 
 if __name__ == "__main__":
