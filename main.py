@@ -11,6 +11,9 @@ if platform == "android":
     from jnius import autoclass, PythonJavaClass, java_method
     BluetoothAdapter = autoclass("android.bluetooth.BluetoothAdapter")
     BluetoothGattDescriptor = autoclass("android.bluetooth.BluetoothGattDescriptor")
+    BluetoothLeScanner = autoclass("android.bluetooth.le.BluetoothLeScanner")
+    ScanCallback = autoclass("android.bluetooth.le.ScanCallback")
+    ScanResult = autoclass("android.bluetooth.le.ScanResult")
     UUID = autoclass("java.util.UUID")
     PythonActivity = autoclass("org.kivy.android.PythonActivity")
     mActivity = PythonActivity.mActivity
@@ -20,8 +23,6 @@ else:
 
 CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
 
-# -----------------------------
-# Richtungsberechnung
 # -----------------------------
 def direction_from_angle(angle):
     if angle >= 337 or angle < 22: return "Nord"
@@ -34,22 +35,26 @@ def direction_from_angle(angle):
     return "Nordwest"
 
 # -----------------------------
-# Scan Callback
+# Moderner ScanCallback
 # -----------------------------
-class BLEScanCallback(PythonJavaClass):
-    __javainterfaces__ = ["android/bluetooth/BluetoothAdapter$LeScanCallback"]
+class MyScanCallback(PythonJavaClass):
+    __javainterfaces__ = ["android/bluetooth/le/ScanCallback"]
 
     def __init__(self, app):
         super().__init__()
         self.app = app
 
-    @java_method("(Landroid/bluetooth/BluetoothDevice;I[B)V")
-    def onLeScan(self, device, rssi, scanRecord):
+    @java_method("(ILandroid/bluetooth/le/ScanResult;)V")
+    def onScanResult(self, callbackType, result):
+        device = result.getDevice()
         name = device.getName()
+
         if name == "Arduino_GCS":
             self.app.log("Gerät gefunden – stoppe Scan")
             self.app.stop_scan()
-            self.app.connect(device)
+
+            # kurze Pause bevor Verbindung
+            Clock.schedule_once(lambda dt: self.app.connect(device), 0.5)
 
 # -----------------------------
 # GATT Callback
@@ -65,12 +70,12 @@ class GattCallback(PythonJavaClass):
     def onConnectionStateChange(self, gatt, status, newState):
         self.app.log(f"Status: {status}, State: {newState}")
 
-        if newState == 2:  # STATE_CONNECTED
+        if newState == 2:
             self.app.log("✅ Verbunden! Suche Services...")
             Clock.schedule_once(lambda dt: gatt.discoverServices(), 1.0)
 
-        elif newState == 0:  # STATE_DISCONNECTED
-            self.app.log("❌ Verbindung getrennt")
+        elif newState == 0:
+            self.app.log("❌ Getrennt")
 
     @java_method("(Landroid/bluetooth/BluetoothGatt;I)V")
     def onServicesDiscovered(self, gatt, status):
@@ -79,16 +84,14 @@ class GattCallback(PythonJavaClass):
         services = gatt.getServices()
         for i in range(services.size()):
             service = services.get(i)
-            self.app.log(f"Service: {service.getUuid()}")
 
             chars = service.getCharacteristics()
             for j in range(chars.size()):
                 char = chars.get(j)
                 uuid = char.getUuid().toString().lower()
-                self.app.log(f"Char: {uuid}")
 
                 if "2a57" in uuid:
-                    self.app.log("🎯 Winkel-Characteristic gefunden")
+                    self.app.log("Winkel-Characteristic gefunden")
 
                     gatt.setCharacteristicNotification(char, True)
                     descriptor = char.getDescriptor(UUID.fromString(CCCD_UUID))
@@ -103,21 +106,15 @@ class GattCallback(PythonJavaClass):
     @java_method("(Landroid/bluetooth/BluetoothGatt;Landroid/bluetooth/BluetoothGattCharacteristic;)V")
     def onCharacteristicChanged(self, gatt, characteristic):
         data = characteristic.getValue()
-
         if data:
-            try:
-                angle = struct.unpack('<i', bytes(data))[0]
-                Clock.schedule_once(lambda dt: self.app.update_angle(angle))
-            except Exception as e:
-                self.app.log(f"Fehler beim Lesen: {e}")
+            angle = struct.unpack('<i', bytes(data))[0]
+            Clock.schedule_once(lambda dt: self.app.update_angle(angle))
 
-# -----------------------------
-# Haupt-App
 # -----------------------------
 class BLEApp(App):
 
     def build(self):
-        self.layout = BoxLayout(orientation="vertical", padding=20, spacing=10)
+        layout = BoxLayout(orientation="vertical", padding=20, spacing=10)
 
         self.angle_label = Label(text="0° – Nord", font_size=60)
         self.button = Button(text="Scan starten", on_press=self.start_scan)
@@ -128,16 +125,17 @@ class BLEApp(App):
         scroll = ScrollView()
         scroll.add_widget(self.log_label)
 
-        self.layout.add_widget(self.angle_label)
-        self.layout.add_widget(self.button)
-        self.layout.add_widget(scroll)
+        layout.add_widget(self.angle_label)
+        layout.add_widget(self.button)
+        layout.add_widget(scroll)
 
-        self.adapter = None
+        self.adapter = BluetoothAdapter.getDefaultAdapter()
+        self.scanner = None
         self.scan_callback = None
         self.gatt = None
         self.gatt_callback = None
 
-        return self.layout
+        return layout
 
     def log(self, text):
         Clock.schedule_once(lambda dt:
@@ -145,42 +143,34 @@ class BLEApp(App):
         )
 
     # -----------------------------
-    # Scan starten
-    # -----------------------------
     def start_scan(self, *args):
-        self.adapter = BluetoothAdapter.getDefaultAdapter()
-
         if not self.adapter or not self.adapter.isEnabled():
-            self.log("Bluetooth ist nicht aktiviert")
+            self.log("Bluetooth nicht aktiv")
             return
 
-        self.log("Starte Scan...")
-        self.scan_callback = BLEScanCallback(self)
-        self.adapter.startLeScan(self.scan_callback)
+        self.log("Starte modernen Scan...")
+
+        self.scanner = self.adapter.getBluetoothLeScanner()
+        self.scan_callback = MyScanCallback(self)
+
+        self.scanner.startScan(self.scan_callback)
 
     def stop_scan(self):
-        if self.adapter and self.scan_callback:
-            self.adapter.stopLeScan(self.scan_callback)
+        if self.scanner and self.scan_callback:
+            self.scanner.stopScan(self.scan_callback)
             self.log("Scan gestoppt")
 
     # -----------------------------
-    # Verbinden
-    # -----------------------------
     def connect(self, device):
-        self.log("Versuche Verbindung...")
-
+        self.log("Verbinde jetzt...")
         self.gatt_callback = GattCallback(self)
 
-        # 🔥 WICHTIG: autoConnect = False
         self.gatt = device.connectGatt(
             mActivity,
-            False,
-            self.gatt_callback,
-            2  # TRANSPORT_LE
+            False,   # WICHTIG
+            self.gatt_callback
         )
 
-    # -----------------------------
-    # Anzeige aktualisieren
     # -----------------------------
     def update_angle(self, angle):
         direction = direction_from_angle(angle)
