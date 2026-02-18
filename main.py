@@ -1,10 +1,7 @@
-import cv2
 from kivy.app import App
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.button import Button
-from kivy.uix.image import Image
-from kivy.graphics.texture import Texture
-from kivy.clock import Clock
+from kivy.uix.camera import Camera
 from kivy.core.window import Window
 
 # =====================================================
@@ -26,34 +23,19 @@ class DraggableCorner(Button):
         return super().on_touch_move(touch)
 
 # =====================================================
-# Haupt-Widget
+# Dashboard
 # =====================================================
 class Dashboard(FloatLayout):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        # Kamera OpenCV
-        self.capture = cv2.VideoCapture(0)
-        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
-        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+        # Kamera
+        self.camera = Camera(play=True, resolution=(1280, 720))
+        self.camera.size_hint = (1, 1)
+        self.add_widget(self.camera)
 
-        # Kameraanzeige
-        self.cam_widget = Image(size_hint=(1, 1))
-        self.add_widget(self.cam_widget)
-
-        # Eckpunkte erzeugen
+        # Eckpunkte
         self.corners = []
-        self.init_corners()
-
-        # Scan-Button (noch ohne Verarbeitung)
-        self.scan_button = Button(text="Scan", size_hint=(None, None),
-                                  size=(150, 60), pos_hint={"center_x": 0.5, "y": 0.02})
-        self.scan_button.bind(on_press=self.on_scan)
-        self.add_widget(self.scan_button)
-
-        Clock.schedule_interval(self.update_frame, 1/30)
-
-    def init_corners(self):
         w, h = Window.width, Window.height
         pad_x, pad_y = w * 0.1, h * 0.1
         for pos in [(pad_x, h - pad_y), (w - pad_x, h - pad_y),
@@ -62,19 +44,11 @@ class Dashboard(FloatLayout):
             self.add_widget(c)
             self.corners.append(c)
 
-    def update_frame(self, dt):
-        ret, frame = self.capture.read()
-        if not ret:
-            return
-        # Hochformat
-        frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
-        frame = cv2.flip(frame, 1)
-        buf = cv2.flip(frame, 0).tobytes()
-        texture = Texture.create(size=(frame.shape[1], frame.shape[0]), colorfmt='bgr')
-        texture.blit_buffer(buf, colorfmt='bgr', bufferfmt='ubyte')
-        self.cam_widget.texture = texture
-        self.cam_widget.canvas.ask_update()
-        self.current_frame = frame
+        # Scan-Button
+        self.scan_button = Button(text="Scan", size_hint=(None, None),
+                                  size=(150, 60), pos_hint={"center_x": 0.5, "y": 0.02})
+        self.scan_button.bind(on_press=self.on_scan)
+        self.add_widget(self.scan_button)
 
     def on_scan(self, instance):
         # Minimal: nur Info ausgeben
