@@ -8,6 +8,8 @@ source.include_exts = py,png,jpg,kv,atlas
 # Hauptscript
 source.dir = .
 source.include_patterns = main.py
+version = 0.1
+
 
 # Python Requirements
 requirements = python3,kivy,opencv-python-headless,numpy
