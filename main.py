@@ -1,58 +1,42 @@
 import os
-from kivy.app import App
-from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.button import Button
-from kivy.uix.image import Image
-from kivy.uix.label import Label
-from kivy.uix.camera import Camera
-from kivy.graphics import Color, Ellipse, Line, Rotate, PushMatrix, PopMatrix
-from kivy.metrics import dp
-from kivy.clock import Clock
-from kivy.core.window import Window
-from kivy.storage.jsonstore import JsonStore
-
 import cv2
 import numpy as np
+from kivy.app import App
+from kivy.uix.widget import Widget
+from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.button import Button
+from kivy.uix.image import Image
+from kivy.graphics.texture import Texture
+from kivy.clock import Clock
+from kivy.core.window import Window
+from kivy.uix.label import Label
 
-try:
-    from android.permissions import request_permissions, Permission
-except:
-    request_permissions = None
-    Permission = None
-
-# =========================
+# =====================================================
 # Draggable Eckpunkte
-# =========================
+# =====================================================
 class DraggableCorner(Button):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.size_hint = (None, None)
         self.size = (40, 40)
-        with self.canvas.before:
-            Color(0, 1, 0, 0.7)
-            self.circle = Ellipse(pos=self.pos, size=self.size)
-        self.bind(pos=self.update_circle, size=self.update_circle)
-
-    def update_circle(self, *args):
-        self.circle.pos = self.pos
-        self.circle.size = self.size
+        self.background_color = (0, 1, 0, 0.6)
 
     def on_touch_move(self, touch):
         if self.collide_point(*touch.pos):
-            x = min(max(0, touch.x - self.width / 2), Window.width - self.width)
-            y = min(max(0, touch.y - self.height / 2), Window.height - self.height)
-            self.pos = (x, y)
+            new_x = min(max(0, touch.x - self.width / 2), Window.width - self.width)
+            new_y = min(max(0, touch.y - self.height / 2), Window.height - self.height)
+            self.pos = (new_x, new_y)
             if self.parent:
                 self.parent.update_lines()
             return True
         return super().on_touch_move(touch)
 
-# =========================
+# =====================================================
 # Image Processor
-# =========================
+# =====================================================
 class ImageProcessor:
-    def order_points(self, pts):
+    @staticmethod
+    def order_points(pts):
         rect = np.zeros((4, 2), dtype="float32")
         pts = np.array(pts)
         s = pts.sum(axis=1)
@@ -63,151 +47,129 @@ class ImageProcessor:
         rect[3] = pts[np.argmax(diff)]
         return rect
 
-    def perspective_correct(self, img, corners):
-        rect = self.order_points(corners)
-        (tl, tr, br, bl) = rect
-        widthA = np.linalg.norm(br - bl)
-        widthB = np.linalg.norm(tr - tl)
-        maxWidth = max(int(widthA), int(widthB))
-        heightA = np.linalg.norm(tr - br)
-        heightB = np.linalg.norm(tl - bl)
-        maxHeight = max(int(heightA), int(heightB))
-        dst = np.array([
-            [0, 0],
-            [maxWidth - 1, 0],
-            [maxWidth - 1, maxHeight - 1],
-            [0, maxHeight - 1]], dtype="float32")
-        M = cv2.getPerspectiveTransform(rect, dst)
-        warped = cv2.warpPerspective(img, M, (maxWidth, maxHeight))
-        return warped
+    @staticmethod
+    def perspective_correct(img, corners):
+        try:
+            rect = ImageProcessor.order_points(corners)
+            (tl, tr, br, bl) = rect
+            widthA = np.linalg.norm(br - bl)
+            widthB = np.linalg.norm(tr - tl)
+            maxWidth = max(int(widthA), int(widthB))
+            heightA = np.linalg.norm(tr - br)
+            heightB = np.linalg.norm(tl - bl)
+            maxHeight = max(int(heightA), int(heightB))
+            dst = np.array([
+                [0, 0],
+                [maxWidth - 1, 0],
+                [maxWidth - 1, maxHeight - 1],
+                [0, maxHeight - 1]], dtype="float32")
+            M = cv2.getPerspectiveTransform(rect, dst)
+            warped = cv2.warpPerspective(img, M, (maxWidth, maxHeight))
+            return warped
+        except Exception as e:
+            print(f"Error in perspective_correct: {e}")
+            return img
 
-# =========================
-# Dashboard
-# =========================
+# =====================================================
+# Dashboard / Haupt-App
+# =====================================================
 class Dashboard(FloatLayout):
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-
-        # Permissions für Android
-        if request_permissions:
-            request_permissions([Permission.CAMERA, Permission.WRITE_EXTERNAL_STORAGE])
-
         self.processor = ImageProcessor()
-        self.user_dir = App.get_running_app().user_data_dir
-        self.photos_dir = os.path.join(self.user_dir, "photos")
-        os.makedirs(self.photos_dir, exist_ok=True)
+        self.corners = []
+        self.capture_button = None
+        self.scanned_img_widget = None
 
-        self.build_camera()
-        self.build_capture_button()
+        # OpenCV VideoCapture
+        self.capture = cv2.VideoCapture(0)  # Kamera 0
+        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
+        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
+
+        # Texture Widget für Kamera
+        self.cam_widget = Image(size_hint=(1, 1), pos=(0, 0))
+        self.add_widget(self.cam_widget)
 
         # Eckpunkte Overlay
-        self.corners = []
-        self.overlay_line = None
-        Clock.schedule_once(lambda dt: self.init_overlay(), 0.2)
+        self.init_corners()
 
-    # =========================
-    # Kamera
-    # =========================
-    def build_camera(self):
-        self.camera = Camera(play=True, resolution=(1920, 1080))
-        self.camera.size_hint = (1, 1)
-        self.camera.pos_hint = {"x": 0, "y": 0}
-        with self.camera.canvas.before:
-            PushMatrix()
-            self.rot = Rotate(angle=-90, origin=self.center)
-        with self.camera.canvas.after:
-            PopMatrix()
-        self.camera.bind(pos=self.update_rot, size=self.update_rot)
-        self.add_widget(self.camera)
+        # Scan Button
+        self.capture_button = Button(text="Scan", size_hint=(None, None),
+                                     size=(150, 60), pos_hint={"center_x": 0.5, "y": 0.02})
+        self.capture_button.bind(on_press=self.scan_document)
+        self.add_widget(self.capture_button)
 
-    def update_rot(self, *args):
-        self.rot.origin = self.camera.center
+        Clock.schedule_interval(self.update_frame, 1.0 / 30)
 
-    # =========================
-    # Capture Button
-    # =========================
-    def build_capture_button(self):
-        self.capture = Button(size_hint=(None, None), size=(dp(70), dp(70)),
-                              pos_hint={"center_x": 0.5, "y": 0.02}, background_color=(0,0,0,0))
-        with self.capture.canvas.before:
-            Color(1,1,1,1)
-            self.outer = Ellipse(pos=self.capture.pos, size=self.capture.size)
-        self.capture.bind(pos=self.update_outer, size=self.update_outer, on_press=self.take_photo)
-        self.add_widget(self.capture)
-
-    def update_outer(self, *args):
-        self.outer.pos = self.capture.pos
-        self.outer.size = self.capture.size
-
-    # =========================
-    # Overlay Eckpunkte
-    # =========================
-    def init_overlay(self):
-        for i in range(4):
-            c = DraggableCorner()
+    # =====================================================
+    # Eckpunkte erzeugen
+    # =====================================================
+    def init_corners(self):
+        w, h = Window.width, Window.height
+        pad_x, pad_y = w * 0.1, h * 0.1
+        for pos in [(pad_x, h - pad_y), (w - pad_x, h - pad_y),
+                    (w - pad_x, pad_y), (pad_x, pad_y)]:
+            c = DraggableCorner(pos=(pos[0] - 20, pos[1] - 20))
             self.add_widget(c)
             self.corners.append(c)
-        self.overlay_line = Line(width=2, points=[])
-        with self.canvas:
-            Color(0,1,0,1)
-            self.canvas.add(self.overlay_line)
-        self.reset_corners()
 
-    def reset_corners(self):
-        w, h = Window.width, Window.height
-        pad_x, pad_y = w*0.1, h*0.1
-        self.corners[0].pos = (pad_x, h - pad_y - 40)
-        self.corners[1].pos = (w - pad_x - 40, h - pad_y - 40)
-        self.corners[2].pos = (w - pad_x - 40, pad_y)
-        self.corners[3].pos = (pad_x, pad_y)
-        self.update_lines()
-
+    # =====================================================
+    # Linien zwischen Eckpunkten aktualisieren
+    # =====================================================
     def update_lines(self):
-        if not self.overlay_line:
+        # Optional: Linien zwischen Punkten zeichnen
+        pass  # Für einfache Version lassen wir es weg
+
+    # =====================================================
+    # Frame von Kamera lesen
+    # =====================================================
+    def update_frame(self, dt):
+        ret, frame = self.capture.read()
+        if not ret:
             return
-        pts = []
-        for idx in [0,1,2,3,0]:
-            c = self.corners[idx]
-            pts += [c.center_x, c.center_y]
-        self.overlay_line.points = pts
+        # Hochformat
+        frame = cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+        frame = cv2.flip(frame, 1)  # Spiegelung
 
-    # =========================
-    # Foto aufnehmen
-    # =========================
-    def take_photo(self, instance):
-        temp_path = os.path.join(self.photos_dir, "scan.png")
-        self.camera.export_to_png(temp_path)
+        # OpenCV -> Kivy Texture
+        buf = cv2.flip(frame, 0).tobytes()
+        texture = Texture.create(size=(frame.shape[1], frame.shape[0]), colorfmt='bgr')
+        texture.blit_buffer(buf, colorfmt='bgr', bufferfmt='ubyte')
+        self.cam_widget.texture = texture
+        self.cam_widget.canvas.ask_update()
+        self.current_frame = frame
 
-        # Eckpunkte für Entzerrung
-        mapped = []
+    # =====================================================
+    # Scan Button
+    # =====================================================
+    def scan_document(self, instance):
+        if not hasattr(self, "current_frame"):
+            return
+        corners = []
         for c in self.corners:
-            px = (c.center_x / Window.width) * 1080
-            py = 1920 - (c.center_y / Window.height) * 1920
-            mapped.append([px, py])
+            x = (c.center_x / Window.width) * self.current_frame.shape[1]
+            y = (c.center_y / Window.height) * self.current_frame.shape[0]
+            corners.append([x, y])
+        warped = self.processor.perspective_correct(self.current_frame, corners)
+        # Anzeigen
+        self.show_scanned(warped)
 
-        img = cv2.imread(temp_path)
-        warped = self.processor.perspective_correct(img, mapped)
-        if warped is not None:
-            cv2.imwrite(temp_path, warped)
-
-        self.show_preview(temp_path)
-
-    # =========================
-    # Vorschau
-    # =========================
-    def show_preview(self, path):
+    # =====================================================
+    # Gescanntes Bild anzeigen
+    # =====================================================
+    def show_scanned(self, img):
         self.clear_widgets()
-        img = Image(source=path, allow_stretch=True)
-        layout = BoxLayout(orientation='vertical')
-        layout.add_widget(img)
-        btn = Button(text="Neues Scan", size_hint_y=0.15)
-        btn.bind(on_press=lambda x: App.get_running_app().stop())
-        layout.add_widget(btn)
-        self.add_widget(layout)
+        # Image Widget
+        buf = cv2.flip(img, 0).tobytes()
+        texture = Texture.create(size=(img.shape[1], img.shape[0]), colorfmt='bgr')
+        texture.blit_buffer(buf, colorfmt='bgr', bufferfmt='ubyte')
+        self.scanned_img_widget = Image(texture=texture, size_hint=(1, 1))
+        self.add_widget(self.scanned_img_widget)
 
-# =========================
-# Main
-# =========================
+# =====================================================
+# Main App
+# =====================================================
 class MainApp(App):
     def build(self):
         return Dashboard()
