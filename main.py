@@ -7,6 +7,7 @@ from kivy.clock import Clock
 from kivy.utils import platform
 import struct
 
+# ----------------------------- Android Imports
 if platform == "android":
     from jnius import autoclass, PythonJavaClass, java_method
     from android.permissions import request_permissions, Permission
@@ -22,7 +23,7 @@ else:
 
 CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
 
-# -----------------------------
+# ----------------------------- Hilfsfunktion für Richtung
 def direction_from_angle(angle):
     if angle >= 337 or angle < 22: return "Nord"
     if angle < 67: return "Nordost"
@@ -33,9 +34,7 @@ def direction_from_angle(angle):
     if angle < 292: return "West"
     return "Nordwest"
 
-# -----------------------------
-# BLE Scan Callback für startLeScan()
-# -----------------------------
+# ----------------------------- BLE ScanCallback für startLeScan()
 if platform == "android":
     class BLEScanCallback(PythonJavaClass):
         __javainterfaces__ = ["android/bluetooth/BluetoothAdapter$LeScanCallback"]
@@ -52,7 +51,23 @@ if platform == "android":
                 self.app.stop_scan()
                 Clock.schedule_once(lambda dt: self.app.connect(device), 0.5)
 
-# -----------------------------
+# ----------------------------- Dummy GattCallback
+if platform == "android":
+    class DummyGattCallback(PythonJavaClass):
+        __javainterfaces__ = ["android/bluetooth/BluetoothGattCallback"]
+
+        def __init__(self, app):
+            super().__init__()
+            self.app = app
+
+        @java_method("(Landroid/bluetooth/BluetoothGatt;II)V")
+        def onConnectionStateChange(self, gatt, status, newState):
+            if newState == 2:
+                self.app.log("✅ Verbunden!")
+            elif newState == 0:
+                self.app.log("❌ Getrennt")
+
+# ----------------------------- Haupt-App
 class BLEApp(App):
 
     def build(self):
@@ -77,6 +92,7 @@ class BLEApp(App):
             self.adapter = BluetoothAdapter.getDefaultAdapter()
             self.scan_cb = None
             self.gatt = None
+            self.gatt_cb = None
 
         return layout
 
@@ -113,8 +129,8 @@ class BLEApp(App):
     def connect(self, device):
         try:
             self.log(f"Verbinde mit {device.getAddress()}...")
-            self.gatt = device.connectGatt(mActivity, False, None, 2)
-            self.log("✅ Connected (GATT ohne Callback, Notifications können direkt gelesen werden)")
+            self.gatt_cb = DummyGattCallback(self)
+            self.gatt = device.connectGatt(mActivity, False, self.gatt_cb, 2)
         except Exception as e:
             self.log(f"Connect Fehler: {e}")
 
