@@ -22,6 +22,7 @@ android.sdk = 33
 
 requirements = python3,kivy,pyjnius,android,pillow,bleak,asyncio,opencv,numpy
 android.permissions = CAMERA,WRITE_EXTERNAL_STORAGE,READ_EXTERNAL_STORAGE,BLUETOOTH,BLUETOOTH_ADMIN,BLUETOOTH_SCAN,BLUETOOTH_CONNECT,ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION
+android.enable_androidx = True
 android.api = 33
 android.minapi = 21
 android.ndk = 25
