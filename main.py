@@ -16,6 +16,7 @@ if platform == "android":
 
     BluetoothAdapter = autoclass("android.bluetooth.BluetoothAdapter")
     BluetoothGattDescriptor = autoclass("android.bluetooth.BluetoothGattDescriptor")
+    BluetoothLeScanner = autoclass("android.bluetooth.le.BluetoothLeScanner")
     UUID = autoclass("java.util.UUID")
     PythonActivity = autoclass("org.kivy.android.PythonActivity")
     mActivity = PythonActivity.mActivity
@@ -37,7 +38,7 @@ def direction_from_angle(angle):
     return "Nordwest"
 
 # -------------------------------------------------
-# SCAN CALLBACK (WICHTIG: __javaclass__)
+# MODERNER SCAN CALLBACK
 # -------------------------------------------------
 if platform == "android":
     class MyScanCallback(PythonJavaClass):
@@ -51,7 +52,6 @@ if platform == "android":
         def onScanResult(self, callbackType, result):
             device = result.getDevice()
             name = device.getName()
-
             if name == "Arduino_GCS":
                 self.app.log("Gerät gefunden!")
                 self.app.stop_scan()
@@ -71,7 +71,6 @@ if platform == "android":
         @java_method("(Landroid/bluetooth/BluetoothGatt;II)V")
         def onConnectionStateChange(self, gatt, status, newState):
             self.app.log(f"Status: {status}, State: {newState}")
-
             if newState == 2:
                 self.app.log("✅ Verbunden – suche Services")
                 Clock.schedule_once(lambda dt: gatt.discoverServices(), 1.0)
@@ -81,22 +80,17 @@ if platform == "android":
         @java_method("(Landroid/bluetooth/BluetoothGatt;I)V")
         def onServicesDiscovered(self, gatt, status):
             self.app.log("Services entdeckt")
-
             services = gatt.getServices()
             for i in range(services.size()):
                 service = services.get(i)
                 chars = service.getCharacteristics()
-
                 for j in range(chars.size()):
                     char = chars.get(j)
                     uuid = char.getUuid().toString().lower()
-
                     if "2a57" in uuid:
                         self.app.log("Winkel-Characteristic gefunden")
-
                         gatt.setCharacteristicNotification(char, True)
                         descriptor = char.getDescriptor(UUID.fromString(CCCD_UUID))
-
                         if descriptor:
                             descriptor.setValue(
                                 BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
@@ -119,13 +113,10 @@ class BLEApp(App):
 
         self.angle_label = Label(text="0° – Nord", font_size=60)
         self.button = Button(text="Scan starten", on_press=self.start_scan)
-
         self.log_label = Label(text="Bereit\n", size_hint_y=None)
         self.log_label.bind(texture_size=self.log_label.setter('size'))
-
         scroll = ScrollView()
         scroll.add_widget(self.log_label)
-
         layout.add_widget(self.angle_label)
         layout.add_widget(self.button)
         layout.add_widget(scroll)
@@ -136,7 +127,6 @@ class BLEApp(App):
                 Permission.BLUETOOTH_CONNECT,
                 Permission.ACCESS_FINE_LOCATION
             ])
-
             self.adapter = BluetoothAdapter.getDefaultAdapter()
             self.scanner = None
             self.scan_callback = None
@@ -155,18 +145,14 @@ class BLEApp(App):
     def start_scan(self, *args):
         if platform != "android":
             return
-
         try:
             if not self.adapter or not self.adapter.isEnabled():
                 self.log("Bluetooth nicht aktiviert")
                 return
-
             self.log("Starte Scan...")
-
             self.scanner = self.adapter.getBluetoothLeScanner()
             self.scan_callback = MyScanCallback(self)
             self.scanner.startScan(self.scan_callback)
-
         except Exception as e:
             self.log(f"Scan Fehler: {e}")
 
