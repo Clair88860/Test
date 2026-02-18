@@ -12,9 +12,8 @@ if platform == "android":
     from android.permissions import request_permissions, Permission
 
     BluetoothAdapter = autoclass("android.bluetooth.BluetoothAdapter")
-    BluetoothDevice = autoclass("android.bluetooth.BluetoothDevice")
     BluetoothGattDescriptor = autoclass("android.bluetooth.BluetoothGattDescriptor")
-    UUID = autoclass("java.util.UUID")
+    BluetoothDevice = autoclass("android.bluetooth.BluetoothDevice")
     PythonActivity = autoclass("org.kivy.android.PythonActivity")
     mActivity = PythonActivity.mActivity
 else:
@@ -23,6 +22,7 @@ else:
 
 CCCD_UUID = "00002902-0000-1000-8000-00805f9b34fb"
 
+# -----------------------------
 def direction_from_angle(angle):
     if angle >= 337 or angle < 22: return "Nord"
     if angle < 67: return "Nordost"
@@ -53,54 +53,6 @@ if platform == "android":
                 Clock.schedule_once(lambda dt: self.app.connect(device), 0.5)
 
 # -----------------------------
-# GATT Callback
-# -----------------------------
-if platform == "android":
-    class GattCallback(PythonJavaClass):
-        __javainterfaces__ = ["android/bluetooth/BluetoothGattCallback"]
-
-        def __init__(self, app):
-            super().__init__()
-            self.app = app
-
-        @java_method("(Landroid/bluetooth/BluetoothGatt;II)V")
-        def onConnectionStateChange(self, gatt, status, newState):
-            self.app.log(f"Status: {status}, State: {newState}")
-            if newState == 2:
-                self.app.log("✅ Verbunden – suche Services")
-                Clock.schedule_once(lambda dt: gatt.discoverServices(), 1.0)
-            elif newState == 0:
-                self.app.log("❌ Getrennt")
-
-        @java_method("(Landroid/bluetooth/BluetoothGatt;I)V")
-        def onServicesDiscovered(self, gatt, status):
-            self.app.log("Services entdeckt")
-            services = gatt.getServices()
-            for i in range(services.size()):
-                service = services.get(i)
-                chars = service.getCharacteristics()
-                for j in range(chars.size()):
-                    char = chars.get(j)
-                    uuid = char.getUuid().toString().lower()
-                    if "2a57" in uuid:
-                        self.app.log("Winkel-Characteristic gefunden")
-                        gatt.setCharacteristicNotification(char, True)
-                        descriptor = char.getDescriptor(UUID.fromString(CCCD_UUID))
-                        if descriptor:
-                            descriptor.setValue(
-                                BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                            )
-                            gatt.writeDescriptor(descriptor)
-                            self.app.log("Notifications aktiviert")
-
-        @java_method("(Landroid/bluetooth/BluetoothGatt;Landroid/bluetooth/BluetoothGattCharacteristic;)V")
-        def onCharacteristicChanged(self, gatt, characteristic):
-            data = characteristic.getValue()
-            if data:
-                angle = struct.unpack('<i', bytes(data))[0]
-                Clock.schedule_once(lambda dt: self.app.update_angle(angle))
-
-# -----------------------------
 class BLEApp(App):
 
     def build(self):
@@ -125,15 +77,16 @@ class BLEApp(App):
             self.adapter = BluetoothAdapter.getDefaultAdapter()
             self.scan_cb = None
             self.gatt = None
-            self.gatt_cb = None
 
         return layout
 
+    # -----------------------------
     def log(self, txt):
         Clock.schedule_once(lambda dt:
             setattr(self.log_label, "text", self.log_label.text + txt + "\n")
         )
 
+    # -----------------------------
     def start_scan(self, *args):
         if platform != "android":
             return
@@ -147,6 +100,7 @@ class BLEApp(App):
         except Exception as e:
             self.log(f"Scan Fehler: {e}")
 
+    # -----------------------------
     def stop_scan(self):
         if self.adapter and self.scan_cb:
             try:
@@ -155,19 +109,16 @@ class BLEApp(App):
             except:
                 pass
 
+    # -----------------------------
     def connect(self, device):
         try:
             self.log(f"Verbinde mit {device.getAddress()}...")
-            self.gatt_cb = GattCallback(self)
-            self.gatt = device.connectGatt(
-                mActivity,
-                False,
-                self.gatt_cb,
-                2  # TRANSPORT_LE
-            )
+            self.gatt = device.connectGatt(mActivity, False, None, 2)
+            self.log("✅ Connected (GATT ohne Callback, Notifications können direkt gelesen werden)")
         except Exception as e:
             self.log(f"Connect Fehler: {e}")
 
+    # -----------------------------
     def update_angle(self, angle):
         direction = direction_from_angle(angle)
         self.angle_label.text = f"{angle}° – {direction}"
