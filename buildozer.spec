@@ -16,7 +16,7 @@ orientation = portrait
 requirements = python3,kivy,pyjnius,android,pillow,bleak,asyncio
 
 # Berechtigungen
-android.permissions = BLUETOOTH,BLUETOOTH_ADMIN,BLUETOOTH_SCAN,BLUETOOTH_CONNECT,ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION
+android.permissions = CAMERA,BLUETOOTH,BLUETOOTH_ADMIN,BLUETOOTH_SCAN,BLUETOOTH_CONNECT,ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION
 
 # Anzeige
 fullscreen = 0
