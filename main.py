@@ -41,7 +41,7 @@ class Dashboard(FloatLayout):
         Clock.schedule_once(lambda dt: self.check_camera_permission(), 0.2)
 
     # =====================================================
-    # Kamera Berechtigungscheck
+    # Kamera Berechtigungschecka
     # =====================================================
     def check_camera_permission(self):
         if platform == "android" and request_permissions:
