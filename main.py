@@ -41,11 +41,21 @@ class Dashboard(FloatLayout):
         Clock.schedule_once(lambda dt: self.check_camera_permission(), 0.2)
 
     # =====================================================
-    # Kamera Berechtigungschecka
+    # Kamera Berechtigung prüfen
     # =====================================================
     def check_camera_permission(self):
         if platform == "android" and request_permissions:
-            request_permissions([Permission.CAMERA], self.permission_callback)
+            if check_permission(Permission.CAMERA):
+                self.show_camera()
+            else:
+                self.clear_widgets()
+                self.add_widget(self.topbar)
+                layout = BoxLayout(orientation="vertical", spacing=20, padding=20)
+                layout.add_widget(Label(text="Kamera-Berechtigung benötigt", font_size=24))
+                btn = Button(text="Berechtigung anfordern", size_hint=(None, None), size=(dp(200), dp(50)))
+                btn.bind(on_press=lambda x: request_permissions([Permission.CAMERA], self.permission_callback))
+                layout.add_widget(btn)
+                self.add_widget(layout)
         else:
             self.show_camera()
 
@@ -58,7 +68,8 @@ class Dashboard(FloatLayout):
                 self.clear_widgets()
                 self.add_widget(self.topbar)
                 self.add_widget(Label(
-                    text="Kamera-Berechtigung benötigt!\nBitte App-Einstellungen prüfen.",
+                    text="Kamera-Berechtigung verweigert.\nBitte in den App-Einstellungen aktivieren.",
+                    font_size=20,
                     pos_hint={"center_x": .5, "center_y": .5}
                 ))
 
@@ -79,7 +90,6 @@ class Dashboard(FloatLayout):
             spacing=5,
             padding=5
         )
-
         for t, f in [
             ("K", self.show_camera),
             ("G", self.show_gallery),
@@ -95,7 +105,6 @@ class Dashboard(FloatLayout):
             )
             b.bind(on_press=f)
             self.topbar.add_widget(b)
-
         self.add_widget(self.topbar)
 
     # =====================================================
@@ -142,12 +151,6 @@ class Dashboard(FloatLayout):
     def show_camera(self, *args):
         self.clear_widgets()
         self.add_widget(self.topbar)
-        if check_permission and not check_permission(Permission.CAMERA):
-            self.add_widget(Label(
-                text="Kamera Berechtigung fehlt",
-                pos_hint={"center_x": .5, "center_y": .5}
-            ))
-            return
         self.camera.play = True
         self.add_widget(self.camera)
         self.add_widget(self.capture)
@@ -224,7 +227,6 @@ class Dashboard(FloatLayout):
         path = os.path.join(self.photos_dir, filename)
         img = Image(source=path, allow_stretch=True)
         img_layout.add_widget(img)
-        # Norden Overlay oben rechts, falls Arduino aktiv
         if self.store.exists("arduino") and self.store.get("arduino")["value"]:
             overlay = Label(
                 text="Norden",
@@ -248,7 +250,7 @@ class Dashboard(FloatLayout):
         self.add_widget(layout)
 
     # =====================================================
-    # Info-Popup mit Sicherheitsabfrage
+    # Info-Popup + Sicherheitsabfrage löschen
     # =====================================================
     def show_info(self, filename):
         path = os.path.join(self.photos_dir, filename)
