@@ -27,62 +27,7 @@ except:
     Permission = None
 
 # =====================================================
-# Image Processor für Entzerrung
-# =====================================================
-class ImageProcessor:
-    def order_points(self, pts):
-        rect = np.zeros((4, 2), dtype="float32")
-        pts = np.array(pts)
-        s = pts.sum(axis=1)
-        rect[0] = pts[np.argmin(s)]  # TL
-        rect[2] = pts[np.argmax(s)]  # BR
-        diff = np.diff(pts, axis=1)
-        rect[1] = pts[np.argmin(diff)]  # TR
-        rect[3] = pts[np.argmax(diff)]  # BL
-        return rect
-
-    def perspective_correct(self, img, corners):
-        try:
-            rect = self.order_points(corners)
-            (tl, tr, br, bl) = rect
-
-            widthA = np.linalg.norm(br - bl)
-            widthB = np.linalg.norm(tr - tl)
-            maxWidth = max(int(widthA), int(widthB))
-
-            heightA = np.linalg.norm(tr - br)
-            heightB = np.linalg.norm(tl - bl)
-            maxHeight = max(int(heightA), int(heightB))
-
-            if maxWidth <= 0 or maxHeight <= 0:
-                return None
-
-            dst = np.array([
-                [0, 0],
-                [maxWidth - 1, 0],
-                [maxWidth - 1, maxHeight - 1],
-                [0, maxHeight - 1]], dtype="float32")
-
-            M = cv2.getPerspectiveTransform(rect, dst)
-            warped = cv2.warpPerspective(img, M, (maxWidth, maxHeight))
-            return warped
-        except Exception as e:
-            print(f"Error in perspective_correct: {e}")
-            return None
-
-    def cv2_to_texture(self, img):
-        try:
-            buf = cv2.flip(img, 0)
-            buf = cv2.cvtColor(buf, cv2.COLOR_BGR2RGB)
-            texture = Texture.create(size=(img.shape[1], img.shape[0]), colorfmt='rgb')
-            texture.blit_buffer(buf.tobytes(), colorfmt='rgb', bufferfmt='ubyte')
-            return texture
-        except Exception as e:
-            print(f"Texture Error: {e}")
-            return None
-
-# =====================================================
-# Draggable Corner für Entzerrung
+# Draggable Eckpunkte für Entzerrung
 # =====================================================
 class DraggableCorner(Button):
     def __init__(self, **kwargs):
@@ -109,18 +54,59 @@ class DraggableCorner(Button):
         return super().on_touch_move(touch)
 
 # =====================================================
-# Dashboard mit Kamera und Entzerrung
+# Image Processor für Entzerrung
+# =====================================================
+class ImageProcessor:
+    def order_points(self, pts):
+        rect = np.zeros((4, 2), dtype="float32")
+        pts = np.array(pts)
+        s = pts.sum(axis=1)
+        rect[0] = pts[np.argmin(s)]  # TL
+        rect[2] = pts[np.argmax(s)]  # BR
+        diff = np.diff(pts, axis=1)
+        rect[1] = pts[np.argmin(diff)]  # TR
+        rect[3] = pts[np.argmax(diff)]  # BL
+        return rect
+
+    def perspective_correct(self, img, corners):
+        try:
+            rect = self.order_points(corners)
+            (tl, tr, br, bl) = rect
+            widthA = np.linalg.norm(br - bl)
+            widthB = np.linalg.norm(tr - tl)
+            maxWidth = max(int(widthA), int(widthB))
+            heightA = np.linalg.norm(tr - br)
+            heightB = np.linalg.norm(tl - bl)
+            maxHeight = max(int(heightA), int(heightB))
+            if maxWidth <= 0 or maxHeight <= 0:
+                return None
+            dst = np.array([
+                [0, 0],
+                [maxWidth - 1, 0],
+                [maxWidth - 1, maxHeight - 1],
+                [0, maxHeight - 1]], dtype="float32")
+            M = cv2.getPerspectiveTransform(rect, dst)
+            warped = cv2.warpPerspective(img, M, (maxWidth, maxHeight))
+            return warped
+        except Exception as e:
+            print(f"Error in perspective_correct: {e}")
+            return None
+
+# =====================================================
+# Dashboard
 # =====================================================
 class Dashboard(FloatLayout):
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+
         self.store = JsonStore("settings.json")
+        self.processor = ImageProcessor()
 
         app = App.get_running_app()
         self.photos_dir = os.path.join(app.user_data_dir, "photos")
         os.makedirs(self.photos_dir, exist_ok=True)
 
-        self.processor = ImageProcessor()
         self.build_topbar()
         self.build_camera()
         self.build_capture_button()
@@ -132,22 +118,41 @@ class Dashboard(FloatLayout):
         Clock.schedule_once(lambda dt: self.show_camera(), 0.2)
 
     # =====================================================
-    # Camera
+    # Nummerierung
+    # =====================================================
+    def get_next_number(self):
+        files = sorted([f for f in os.listdir(self.photos_dir) if f.endswith(".png")])
+        return f"{len(files)+1:04d}"
+
+    # =====================================================
+    # Topbar
+    # =====================================================
+    def build_topbar(self):
+        self.topbar = BoxLayout(size_hint=(1, .08), pos_hint={"top": 1}, spacing=5, padding=5)
+        for t, f in [("K", self.show_camera), ("G", self.show_gallery), ("E", self.show_settings),
+                     ("A", self.show_a), ("H", self.show_help)]:
+            b = Button(text=t, background_color=(0.15, 0.15, 0.15, 1), color=(1, 1, 1, 1))
+            b.bind(on_press=f)
+            self.topbar.add_widget(b)
+        self.add_widget(self.topbar)
+
+    # =====================================================
+    # Kamera (vergrößert)
     # =====================================================
     def build_camera(self):
         self.camera = Camera(play=False, resolution=(1920, 1080))
-        # Fast Vollbild: Oben nach unten 8% Topbar, Button 8% unten
+        # Fast Vollbild: Topbar 8%, Button unten 8%
         self.camera.size_hint = (1, 0.84)
-        self.camera.pos_hint = {"x":0, "y":0.08}
+        self.camera.pos_hint = {"x": 0, "y": 0.08}
 
     # =====================================================
     # Capture Button
     # =====================================================
     def build_capture_button(self):
-        self.capture = Button(size_hint=(None,None), size=(dp(70),dp(70)),
-                              pos_hint={"center_x":0.5, "y":0.01}, background_color=(0,0,0,0))
+        self.capture = Button(size_hint=(None, None), size=(dp(70), dp(70)),
+                              pos_hint={"center_x": 0.5, "y": 0.01}, background_color=(0, 0, 0, 0))
         with self.capture.canvas.before:
-            Color(1,1,1,1)
+            Color(1, 1, 1, 1)
             self.outer_circle = Ellipse(pos=self.capture.pos, size=self.capture.size)
         self.capture.bind(pos=self.update_circle, size=self.update_circle, on_press=self.take_photo)
 
@@ -156,20 +161,18 @@ class Dashboard(FloatLayout):
         self.outer_circle.size = self.capture.size
 
     # =====================================================
-    # Show Camera
+    # Kameraanzeige
     # =====================================================
     def show_camera(self, *args):
         self.clear_widgets()
         self.add_widget(self.topbar)
         if check_permission and not check_permission(Permission.CAMERA):
-            self.add_widget(Label(text="Kamera Berechtigung fehlt", pos_hint={"center_x":0.5,"center_y":0.5}))
+            self.add_widget(Label(text="Kamera Berechtigung fehlt", pos_hint={"center_x": .5, "center_y": .5}))
             return
-
         self.camera.play = True
         self.add_widget(self.camera)
         self.add_widget(self.capture)
 
-        # Overlay nur wenn aktiviert
         if self.entzerrung_enabled:
             self.init_overlay()
 
@@ -177,7 +180,7 @@ class Dashboard(FloatLayout):
     # Overlay für Entzerrung
     # =====================================================
     def init_overlay(self):
-        # 4 Eckpunkte
+        # Eckpunkte hinzufügen
         self.corners = []
         for i in range(4):
             c = DraggableCorner()
@@ -185,40 +188,39 @@ class Dashboard(FloatLayout):
             self.corners.append(c)
         self.overlay_line = Line(width=2, points=[])
         with self.canvas:
-            Color(0,1,0,1)
+            Color(0, 1, 0, 1)
             self.canvas.add(self.overlay_line)
         self.reset_corners()
 
     def reset_corners(self):
         w, h = Window.width, Window.height
-        pad_x = w*0.15
-        pad_y = h*0.15
-        self.corners[0].pos = (pad_x, h-0.08*h - pad_y)  # TL
-        self.corners[1].pos = (w-pad_x, h-0.08*h - pad_y)  # TR
-        self.corners[2].pos = (w-pad_x, 0.08*h + pad_y)  # BR
-        self.corners[3].pos = (pad_x, 0.08*h + pad_y)  # BL
+        pad_x = w * 0.15
+        pad_y = h * 0.15
+        self.corners[0].pos = (pad_x, h - 0.08 * h - pad_y)  # TL
+        self.corners[1].pos = (w - pad_x, h - 0.08 * h - pad_y)  # TR
+        self.corners[2].pos = (w - pad_x, 0.08 * h + pad_y)  # BR
+        self.corners[3].pos = (pad_x, 0.08 * h + pad_y)  # BL
         self.update_lines()
 
     def update_lines(self):
         if not self.overlay_line:
             return
         points = []
-        for idx in [0,1,2,3,0]:
+        for idx in [0, 1, 2, 3, 0]:
             c = self.corners[idx]
             points.append(c.center_x)
             points.append(c.center_y)
         self.overlay_line.points = points
 
     # =====================================================
-    # Take Photo
+    # Foto aufnehmen
     # =====================================================
     def take_photo(self, instance):
         number = self.get_next_number()
-        path = os.path.join(self.photos_dir, f"{number}.png")
+        path = os.path.join(self.photos_dir, number + ".png")
         self.camera.export_to_png(path)
 
         if self.entzerrung_enabled:
-            # Perspective Correction
             h_real, w_real = 1080, 1920
             mapped_corners = []
             for c in self.corners:
@@ -235,7 +237,7 @@ class Dashboard(FloatLayout):
             self.show_preview(path)
 
     # =====================================================
-    # Preview
+    # Vorschau
     # =====================================================
     def show_preview(self, path):
         self.clear_widgets()
@@ -245,39 +247,16 @@ class Dashboard(FloatLayout):
         layout.add_widget(img)
         btns = BoxLayout(size_hint_y=0.2)
         save = Button(text="Speichern"); repeat = Button(text="Wiederholen")
-        save.bind(on_press=lambda x:self.show_camera())
-        repeat.bind(on_press=lambda x:self.show_camera())
+        save.bind(on_press=lambda x: self.show_camera())
+        repeat.bind(on_press=lambda x: self.show_camera())
         btns.add_widget(save); btns.add_widget(repeat)
         layout.add_widget(btns)
         self.add_widget(layout)
 
     # =====================================================
-    # Nummerierung
+    # Rest deines Main Codes bleibt unverändert (Galerie, A/H/Settings etc.)
     # =====================================================
-    def get_next_number(self):
-        files = sorted([f for f in os.listdir(self.photos_dir) if f.endswith(".png")])
-        return f"{len(files)+1:04d}"
 
-    # =====================================================
-    # Topbar & Einstellungen
-    # =====================================================
-    def build_topbar(self):
-        self.topbar = BoxLayout(size_hint=(1,0.08), pos_hint={'top':1}, spacing=5, padding=5)
-        for t,f in [("K",self.show_camera),("G",self.show_gallery),("E",self.show_settings),
-                    ("A",self.show_a),("H",self.show_help)]:
-            b = Button(text=t, background_color=(0.15,0.15,0.15,1), color=(1,1,1,1))
-            b.bind(on_press=f)
-            self.topbar.add_widget(b)
-        self.add_widget(self.topbar)
-
-    # =====================================================
-    # Galerie / A / H / Settings
-    # =====================================================
-    # ... hier kann der Rest deines bestehenden Codes für Galerie, Settings etc. bleiben ...
-
-# =====================================================
-# App Start
-# =====================================================
 class MainApp(App):
     def build(self):
         return Dashboard()
